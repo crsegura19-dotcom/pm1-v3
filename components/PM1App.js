@@ -375,6 +375,7 @@ export default function PM1App() {
         lesson: parsed.lesson,
         proposedCombat: !hasPendingMission ? parsed.combat : null,
         committed: false,
+        declined: false,
       };
 
       const threadWithReply = { ...threadWithMsg, messages: [...threadWithMsg.messages, assistantMsg] };
@@ -403,9 +404,9 @@ export default function PM1App() {
   }
 
   // ============================================================================
-  // COMPROMISO — instantáneo, sin modal. Tocar "Comprometerme" activa la misión ya.
-  // Una vez usado, el mensaje que lo propuso queda marcado como comprometido para
-  // que no se pueda volver a pulsar y crear una misión duplicada.
+  // COMPROMISO — la tarjeta pregunta directamente "¿Lo harás? Sí / No", sin
+  // paso previo. "Sí" activa la misión ya. "No" también es una respuesta real:
+  // se manda a la IA para que investigue la resistencia, no se descarta en silencio.
   // ============================================================================
   function handleCommit(actionText, messageId) {
     if (!activeThread) return;
@@ -415,6 +416,14 @@ export default function PM1App() {
     const messages = thread.messages.map((m) => (m.id === messageId ? { ...m, committed: true } : m));
     next = { ...next, threads: { ...next.threads, [activeThread.id]: { ...thread, messages } } };
     persist(next);
+  }
+
+  function handleDecline(messageId) {
+    if (!activeThread) return;
+    const messages = activeThread.messages.map((m) => (m.id === messageId ? { ...m, declined: true } : m));
+    const next = { ...profile, threads: { ...profile.threads, [activeThread.id]: { ...activeThread, messages } } };
+    persist(next);
+    sendMessageTo(activeThread.id, next, "No, ahora no.");
   }
 
   // ============================================================================
@@ -1038,8 +1047,16 @@ export default function PM1App() {
                       <span style={styles.combatTagText}>{msg.proposedCombat}</span>
                       {msg.committed ? (
                         <span style={styles.combatCommittedTag}>✓ Ya te comprometiste con esto</span>
+                      ) : msg.declined ? (
+                        <span style={styles.combatDeclinedTag}>Dijiste que ahora no</span>
                       ) : (
-                        <button style={styles.commitBtn} onClick={() => handleCommit(msg.proposedCombat, msg.id)}>Me comprometo →</button>
+                        <>
+                          <p style={styles.combatAskQuestion}>¿Lo harás?</p>
+                          <div style={styles.combatAskBtns}>
+                            <button style={styles.commitBtn} onClick={() => handleCommit(msg.proposedCombat, msg.id)}>Sí, lo haré →</button>
+                            <button style={styles.declineBtn} onClick={() => handleDecline(msg.id)}>No</button>
+                          </div>
+                        </>
                       )}
                     </div>
                   )}
@@ -1200,7 +1217,11 @@ const styles = {
   combatTagLabel: { display: "block", fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#c8f542", letterSpacing: "2px" },
   combatTagText: { fontSize: 13, color: "#c8f542", fontWeight: 500 },
   combatCommittedTag: { alignSelf: "flex-start", fontSize: 11.5, color: "#4ade80", fontFamily: "'Space Mono', monospace" },
-  commitBtn: { alignSelf: "flex-start", background: "#c8f542", color: "#0a0a0a", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" },
+  combatDeclinedTag: { alignSelf: "flex-start", fontSize: 11.5, color: "#777", fontFamily: "'Space Mono', monospace" },
+  combatAskQuestion: { fontSize: 12, color: "#888", fontFamily: "'Space Mono', monospace", letterSpacing: "0.5px" },
+  combatAskBtns: { display: "flex", gap: 8 },
+  commitBtn: { flex: 1, background: "#c8f542", color: "#0a0a0a", border: "none", borderRadius: 6, padding: "8px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" },
+  declineBtn: { background: "none", border: "1px solid #333", color: "#888", borderRadius: 6, padding: "8px 16px", fontSize: 12.5, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
 
   evasionTag: { marginTop: 8, padding: "8px 12px", background: "rgba(248,113,113,0.05)", border: "1px solid rgba(248,113,113,0.15)", borderRadius: 6 },
   evasionTagLabel: { display: "block", fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#f87171", letterSpacing: "2px", marginBottom: 4 },
