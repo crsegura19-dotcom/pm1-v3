@@ -32,6 +32,9 @@ import {
   STARTER_CHIPS,
   confirmThreadTitle,
   dismissSuggestedTitle,
+  uid,
+  isDecreeSlotCheckedToday,
+  decreeDayNumber,
 } from "../lib/pm1-engine";
 
 // ============================================================================
@@ -319,7 +322,7 @@ export default function PM1App() {
   async function sendMessageTo(threadId, profileSnapshot, text) {
     const thread = profileSnapshot.threads[threadId];
     if (!thread) return;
-    const userMsg = { role: "user", content: text };
+    const userMsg = { id: uid("msg_"), role: "user", content: text };
     const threadWithMsg = { ...thread, messages: [...thread.messages, userMsg] };
     let next = { ...profileSnapshot, threads: { ...profileSnapshot.threads, [threadId]: threadWithMsg } };
     persist(next);
@@ -338,12 +341,14 @@ export default function PM1App() {
       const hasPendingMission = threadWithMsg.missions.some((m) => m.executed === null);
 
       const assistantMsg = {
+        id: uid("msg_"),
         role: "assistant",
         content: parsed.text,
         mechanism: parsed.mechanism,
         evasion: parsed.evasion,
         lesson: parsed.lesson,
         proposedCombat: !hasPendingMission ? parsed.combat : null,
+        committed: false,
       };
 
       const threadWithReply = { ...threadWithMsg, messages: [...threadWithMsg.messages, assistantMsg] };
@@ -351,7 +356,7 @@ export default function PM1App() {
       next = updateFromParsed(next, threadId, parsed);
       persist(next);
     } catch (err) {
-      const errMsg = { role: "assistant", content: "Error de conexión. Inténtalo de nuevo." };
+      const errMsg = { id: uid("msg_"), role: "assistant", content: "Error de conexión. Inténtalo de nuevo." };
       const threadWithErr = { ...threadWithMsg, messages: [...threadWithMsg.messages, errMsg] };
       persist({ ...next, threads: { ...next.threads, [threadId]: threadWithErr } });
     }
@@ -373,16 +378,23 @@ export default function PM1App() {
 
   // ============================================================================
   // COMPROMISO — instantáneo, sin modal. Tocar "Comprometerme" activa la misión ya.
+  // Una vez usado, el mensaje que lo propuso queda marcado como comprometido para
+  // que no se pueda volver a pulsar y crear una misión duplicada.
   // ============================================================================
-  function handleCommit(actionText) {
+  function handleCommit(actionText, messageId) {
     if (!activeThread) return;
-    persist(addMission(profile, activeThread.id, actionText));
+    if (activeThread.missions.some((m) => m.executed === null)) return; // ya hay una pendiente
+    let next = addMission(profile, activeThread.id, actionText);
+    const thread = next.threads[activeThread.id];
+    const messages = thread.messages.map((m) => (m.id === messageId ? { ...m, committed: true } : m));
+    next = { ...next, threads: { ...next.threads, [activeThread.id]: { ...thread, messages } } };
+    persist(next);
   }
 
   // ============================================================================
   // RESOLUCIÓN DE MISIÓN
   // ============================================================================
-  function finalizeResolution(threadId, missionId, executed, obstacle = null) {
+  async function finalizeResolution(threadId, missionId, executed, obstacle = null) {
     let next = resolveMission(profile, threadId, missionId, executed, obstacle);
     let thread = next.threads[threadId];
 
@@ -394,9 +406,22 @@ export default function PM1App() {
       next = { ...next, threads: { ...next.threads, [threadId]: thread } };
     }
 
+    next = { ...next, activeThreadId: threadId };
     persist(next);
     setConfrontMission(null);
     setObstacleCapture(null);
+    setView("chat");
+
+    // El resultado se manda a la IA como si el usuario lo hubiera escrito —
+    // tocar el botón ES la respuesta. Así el combate tiene un cierre real
+    // (felicitación, lección, o indagación sin castigo) en vez de quedar mudo.
+    const closingText = executed
+      ? "Sí, lo hice."
+      : obstacle
+        ? `No pude. ${obstacle}`
+        : "No pude.";
+
+    await sendMessageTo(threadId, next, closingText);
   }
 
   function handleYes(threadId, missionId) {
@@ -490,8 +515,8 @@ export default function PM1App() {
 
         <div style={styles.scrollArea}>
           <div style={styles.starterCard}>
-            <p style={styles.starterQuestion}>¿Qué es eso que sabes que deberías hacer y no haces?</p>
-            <p style={styles.starterSub}>No hace falta que sepas ponerle nombre. Solo cuéntalo.</p>
+            <p style={styles.starterQuestion}>¿Qué es eso que quieres hacer?</p>
+            <p style={styles.starterSub}>Y que llevas tiempo posponiendo, evitando, o sintiendo sin saber cómo soltarlo.</p>
 
             <div style={styles.chipRow}>
               {[...STARTER_CHIPS, ...customStarters].map((s) => (
@@ -672,17 +697,31 @@ export default function PM1App() {
           ) : (
             allDecreePrograms.map((p) => {
               const pct = decreeProgramProgress(p);
+              const doneAM = isDecreeSlotCheckedToday(p, "manana");
+              const donePM = isDecreeSlotCheckedToday(p, "noche");
               return (
                 <div key={p.id} style={styles.decreeCard}>
                   <div style={styles.decreeCardHeader}>
                     <span style={{ ...styles.decreeThreadTag, color: p.threadColor, borderColor: p.threadColor }}>{p.threadTitle}</span>
-                    <span style={styles.decreeProgress}>{pct}%</span>
+                    <span style={styles.decreeProgress}>Día {decreeDayNumber(p)} de {p.durationDays}</span>
                   </div>
                   {p.texts.map((t, i) => <p key={i} style={styles.decreeCardText}>"{t}"</p>)}
                   <Bar pct={pct} color="#60a5fa" />
                   <div style={styles.resumeBannerBtns}>
-                    <button style={styles.resumeBtnSmall} onClick={() => handleDecreeCheckin(p.threadId, p.id, "manana")}>Marcar mañana</button>
-                    <button style={styles.resumeBtnSmall} onClick={() => handleDecreeCheckin(p.threadId, p.id, "noche")}>Marcar noche</button>
+                    <button
+                      style={{ ...styles.resumeBtnSmall, ...(doneAM ? styles.decreeDoneBtn : {}) }}
+                      disabled={doneAM}
+                      onClick={() => handleDecreeCheckin(p.threadId, p.id, "manana")}
+                    >
+                      {doneAM ? "✓ Mañana marcada" : "Marcar mañana"}
+                    </button>
+                    <button
+                      style={{ ...styles.resumeBtnSmall, ...(donePM ? styles.decreeDoneBtn : {}) }}
+                      disabled={donePM}
+                      onClick={() => handleDecreeCheckin(p.threadId, p.id, "noche")}
+                    >
+                      {donePM ? "✓ Noche marcada" : "Marcar noche"}
+                    </button>
                   </div>
                 </div>
               );
@@ -806,44 +845,48 @@ export default function PM1App() {
         </div>
       </div>
 
-      <div style={styles.chatContainer}>
-        <div style={styles.messages}>
-          {activeThread.suggestedTitle && !activeThread.titleConfirmed && (
-            <div style={styles.titleSuggestBanner}>
-              <span style={styles.sectionLabel}>NOMBRE SUGERIDO PARA ESTE COMBATE</span>
-              {titleNameInput !== activeThread.id ? (
-                <>
-                  <p style={styles.titleSuggestText}>"{activeThread.suggestedTitle}"</p>
-                  <div style={styles.resumeBannerBtns}>
-                    <button style={styles.resumeBtnSmall} onClick={() => persist(confirmThreadTitle(profile, activeThread.id, activeThread.suggestedTitle))}>Sí, así es</button>
-                    <button style={styles.resumeBtnSmall} onClick={() => setTitleNameInput(activeThread.id)}>Prefiero otro nombre</button>
-                    <button style={styles.resumeBtnSmall} onClick={() => persist(dismissSuggestedTitle(profile, activeThread.id))}>Ahora no</button>
-                  </div>
-                </>
-              ) : (
-                <div style={styles.titleSuggestEditRow}>
-                  <input
-                    style={styles.chipAddInput}
-                    placeholder="Escribe el nombre que prefieras"
-                    defaultValue={activeThread.suggestedTitle}
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") { persist(confirmThreadTitle(profile, activeThread.id, e.target.value)); setTitleNameInput(null); }
-                    }}
-                    id="title-rename-input"
-                  />
-                  <button
-                    style={styles.chipAddConfirm}
-                    onClick={() => {
-                      const val = document.getElementById("title-rename-input").value;
-                      persist(confirmThreadTitle(profile, activeThread.id, val));
-                      setTitleNameInput(null);
-                    }}
-                  >✓</button>
-                </div>
-              )}
+      {activeThread.suggestedTitle && !activeThread.titleConfirmed && (
+        <div style={styles.titleSuggestBanner}>
+          <div style={styles.titleSuggestHeader}>
+            <span style={styles.titleSuggestPulseDot} />
+            <span style={styles.sectionLabel}>NOMBRE SUGERIDO PARA ESTE COMBATE</span>
+          </div>
+          {titleNameInput !== activeThread.id ? (
+            <>
+              <p style={styles.titleSuggestText}>"{activeThread.suggestedTitle}"</p>
+              <div style={styles.resumeBannerBtns}>
+                <button style={styles.resumeBtnSmall} onClick={() => persist(confirmThreadTitle(profile, activeThread.id, activeThread.suggestedTitle))}>Sí, así es</button>
+                <button style={styles.resumeBtnSmall} onClick={() => setTitleNameInput(activeThread.id)}>Prefiero otro nombre</button>
+                <button style={styles.resumeBtnSmall} onClick={() => persist(dismissSuggestedTitle(profile, activeThread.id))}>Ahora no</button>
+              </div>
+            </>
+          ) : (
+            <div style={styles.titleSuggestEditRow}>
+              <input
+                style={styles.chipAddInput}
+                placeholder="Escribe el nombre que prefieras"
+                defaultValue={activeThread.suggestedTitle}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { persist(confirmThreadTitle(profile, activeThread.id, e.target.value)); setTitleNameInput(null); }
+                }}
+                id="title-rename-input"
+              />
+              <button
+                style={styles.chipAddConfirm}
+                onClick={() => {
+                  const val = document.getElementById("title-rename-input").value;
+                  persist(confirmThreadTitle(profile, activeThread.id, val));
+                  setTitleNameInput(null);
+                }}
+              >✓</button>
             </div>
           )}
+        </div>
+      )}
+
+      <div style={styles.chatContainer}>
+        <div style={styles.messages}>
 
           {showResumeBanner && (
             <div style={styles.resumeBanner}>
@@ -893,7 +936,7 @@ export default function PM1App() {
           {activeThread.messages.length === 0 && !showCheckinChips && (
             <div style={styles.emptyState}>
               <div style={styles.emptyIcon}>⚔</div>
-              <p style={styles.emptyTitle}>¿Qué es eso que quieres y no puedes hacer?</p>
+              <p style={styles.emptyTitle}>¿Qué es eso que quieres hacer?</p>
             </div>
           )}
 
@@ -925,7 +968,11 @@ export default function PM1App() {
                     <div style={styles.combatTag}>
                       <span style={styles.combatTagLabel}>PRIMER COMBATE PROPUESTO</span>
                       <span style={styles.combatTagText}>{msg.proposedCombat}</span>
-                      <button style={styles.commitBtn} onClick={() => handleCommit(msg.proposedCombat)}>Me comprometo →</button>
+                      {msg.committed ? (
+                        <span style={styles.combatCommittedTag}>✓ Ya te comprometiste con esto</span>
+                      ) : (
+                        <button style={styles.commitBtn} onClick={() => handleCommit(msg.proposedCombat, msg.id)}>Me comprometo →</button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -968,16 +1015,33 @@ export default function PM1App() {
         {activeDecreePrograms.length > 0 && (
           <div style={styles.decreeBar}>
             <span style={styles.sectionLabel}>DECRETOS ACTIVOS EN ESTE COMBATE</span>
-            {activeDecreePrograms.map((p) => (
-              <div key={p.id} style={styles.decreeProgramRow}>
-                {p.texts.map((t, i) => <p key={i} style={styles.decreeText}>"{t}"</p>)}
-                <Bar pct={decreeProgramProgress(p)} color="#60a5fa" />
-                <div style={styles.resumeBannerBtns}>
-                  <button style={styles.resumeBtnSmall} onClick={() => handleDecreeCheckin(activeThread.id, p.id, "manana")}>Marcar mañana</button>
-                  <button style={styles.resumeBtnSmall} onClick={() => handleDecreeCheckin(activeThread.id, p.id, "noche")}>Marcar noche</button>
+            {activeDecreePrograms.map((p) => {
+              const doneAM = isDecreeSlotCheckedToday(p, "manana");
+              const donePM = isDecreeSlotCheckedToday(p, "noche");
+              return (
+                <div key={p.id} style={styles.decreeProgramRow}>
+                  {p.texts.map((t, i) => <p key={i} style={styles.decreeText}>"{t}"</p>)}
+                  <p style={styles.decreeDayLabel}>Día {decreeDayNumber(p)} de {p.durationDays}</p>
+                  <Bar pct={decreeProgramProgress(p)} color="#60a5fa" />
+                  <div style={styles.resumeBannerBtns}>
+                    <button
+                      style={{ ...styles.resumeBtnSmall, ...(doneAM ? styles.decreeDoneBtn : {}) }}
+                      disabled={doneAM}
+                      onClick={() => handleDecreeCheckin(activeThread.id, p.id, "manana")}
+                    >
+                      {doneAM ? "✓ Mañana marcada" : "Marcar mañana"}
+                    </button>
+                    <button
+                      style={{ ...styles.resumeBtnSmall, ...(donePM ? styles.decreeDoneBtn : {}) }}
+                      disabled={donePM}
+                      onClick={() => handleDecreeCheckin(activeThread.id, p.id, "noche")}
+                    >
+                      {donePM ? "✓ Noche marcada" : "Marcar noche"}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -1023,7 +1087,9 @@ const styles = {
   starterTextarea: { background: "#0a0a0a", border: "1px solid #222", borderRadius: 8, color: "#e8e8e8", fontSize: 14, padding: "12px 14px", resize: "none", lineHeight: 1.6, fontFamily: "'Space Grotesk', sans-serif", marginTop: 4 },
   starterBtn: { width: "100%", padding: "12px", fontSize: 13.5 },
 
-  titleSuggestBanner: { margin: "0 0 4px", padding: "12px 14px", background: "#0d0d0d", border: "1px solid rgba(200,245,66,0.25)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 6 },
+  titleSuggestBanner: { margin: "10px 16px 0", padding: "12px 14px", background: "#0d0d0d", border: "1px solid rgba(200,245,66,0.35)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 6, flexShrink: 0, boxShadow: "0 4px 14px rgba(200,245,66,0.08)" },
+  titleSuggestHeader: { display: "flex", alignItems: "center", gap: 7 },
+  titleSuggestPulseDot: { width: 7, height: 7, borderRadius: "50%", background: "#c8f542", animation: "pulse 1.2s ease-in-out infinite", flexShrink: 0 },
   titleSuggestText: { fontSize: 15, color: "#c8f542", fontWeight: 600 },
   titleSuggestEditRow: { display: "flex", gap: 6, marginTop: 4 },
   newThreadBtn: { background: "#c8f542", color: "#0a0a0a", border: "none", borderRadius: 8, padding: "0 16px", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" },
@@ -1064,6 +1130,7 @@ const styles = {
   combatTag: { marginTop: 12, padding: "10px 12px", background: "rgba(200,245,66,0.06)", border: "1px solid rgba(200,245,66,0.2)", borderRadius: 6, display: "flex", flexDirection: "column", gap: 8 },
   combatTagLabel: { display: "block", fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#c8f542", letterSpacing: "2px" },
   combatTagText: { fontSize: 13, color: "#c8f542", fontWeight: 500 },
+  combatCommittedTag: { alignSelf: "flex-start", fontSize: 11.5, color: "#4ade80", fontFamily: "'Space Mono', monospace" },
   commitBtn: { alignSelf: "flex-start", background: "#c8f542", color: "#0a0a0a", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" },
 
   evasionTag: { marginTop: 8, padding: "8px 12px", background: "rgba(248,113,113,0.05)", border: "1px solid rgba(248,113,113,0.15)", borderRadius: 6 },
@@ -1112,6 +1179,8 @@ const styles = {
   decreeCardHeader: { display: "flex", alignItems: "center", justifyContent: "space-between" },
   decreeThreadTag: { fontSize: 11, padding: "3px 8px", borderRadius: 4, border: "1px solid", fontFamily: "'Space Mono', monospace" },
   decreeProgress: { fontSize: 12, color: "#666", fontFamily: "'Space Mono', monospace" },
+  decreeDoneBtn: { opacity: 0.5, cursor: "default", color: "#4ade80", borderColor: "rgba(74,222,128,0.3)" },
+  decreeDayLabel: { fontSize: 11, color: "#555", fontFamily: "'Space Mono', monospace" },
   decreeCardText: { fontSize: 13, color: "#93c5fd", fontStyle: "italic", lineHeight: 1.5 },
 
   inputArea: { display: "flex", alignItems: "flex-end", gap: 10, padding: "12px 16px 16px", borderTop: "1px solid #141414", flexShrink: 0 },
