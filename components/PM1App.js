@@ -13,7 +13,6 @@ import {
   addMission,
   isMissionOverdue,
   resolveMission,
-  extendMissionOnce,
   interpretInaction,
   maybeGenerateHypothesis,
   resolveHypothesis,
@@ -27,6 +26,9 @@ import {
   getMechanismFrequencyList,
   getWeeklyActivity,
   getAllDecreePrograms,
+  FEELING_CHIPS,
+  CONTEXT_CHIPS,
+  formatCheckin,
 } from "../lib/pm1-engine";
 
 // ============================================================================
@@ -72,7 +74,7 @@ function BottomNav({ active, onChange }) {
       {items.map((it) => (
         <button
           key={it.id}
-          style={{ ...styles.bottomNavBtn, ...(active === it.id ? styles.bottomNavBtnActive : {}) }}
+          style={styles.bottomNavBtn}
           onClick={() => onChange(it.id)}
         >
           <span style={{ ...styles.bottomNavIcon, color: active === it.id ? "#c8f542" : "#444" }}>{it.icon}</span>
@@ -91,23 +93,45 @@ function Bar({ pct, color = "#c8f542" }) {
   );
 }
 
+// Captura ligera de obstáculo — solo aparece cuando el usuario dice "no pude".
+// Un único campo, opcional, sin bloquear: se puede omitir con un toque.
+function ObstacleCapture({ onConfirm, onSkip }) {
+  const [text, setText] = useState("");
+  return (
+    <div style={styles.obstacleCapture}>
+      <p style={styles.obstacleQuestion}>¿Qué te lo impidió?</p>
+      <input
+        style={styles.obstacleInput}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Una frase, lo primero que se te ocurra..."
+        autoFocus
+      />
+      <div style={styles.combatBarBtns}>
+        <button style={{ ...styles.combatBtn, ...styles.combatBtnNo }} onClick={() => onConfirm(text.trim())}>Confirmar</button>
+        <button style={styles.obstacleSkipBtn} onClick={() => onSkip()}>Prefiero no decirlo</button>
+      </div>
+    </div>
+  );
+}
+
 // ============================================================================
 // APP PRINCIPAL
 // ============================================================================
 
 export default function PM1App() {
-  const [view, setView] = useState("map"); // map | chat | mirror | decrees | profile
+  const [view, setView] = useState("map");
   const [profile, setProfile] = useState(buildProfile);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [newThreadTitle, setNewThreadTitle] = useState("");
-  const [commitStep, setCommitStep] = useState(null);
-  const [commitTime, setCommitTime] = useState("");
-  const [commitObstacle, setCommitObstacle] = useState("");
   const [confrontMission, setConfrontMission] = useState(null);
   const [dismissedResume, setDismissedResume] = useState({});
   const [evolutionOpenThreadId, setEvolutionOpenThreadId] = useState(null);
   const [calendarOffset, setCalendarOffset] = useState(0);
+  const [obstacleCapture, setObstacleCapture] = useState(null); // { threadId, missionId, context: 'confront'|'bar' }
+  const [checkinFeelings, setCheckinFeelings] = useState([]);
+  const [checkinContexts, setCheckinContexts] = useState([]);
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -151,12 +175,16 @@ export default function PM1App() {
     const next = addThread(profile, newThreadTitle.trim());
     persist(next);
     setNewThreadTitle("");
+    setCheckinFeelings([]);
+    setCheckinContexts([]);
     setView("chat");
   }
 
   function openThread(threadId) {
     const next = touchThread(profile, threadId);
     persist({ ...next, activeThreadId: threadId });
+    setCheckinFeelings([]);
+    setCheckinContexts([]);
     setView("chat");
     const t = next.threads[threadId];
     const pending = t.missions.find((m) => m.executed === null);
@@ -174,6 +202,18 @@ export default function PM1App() {
   }
 
   // ============================================================================
+  // CHECK-IN RÁPIDO (chips)
+  // ============================================================================
+  function toggleChip(list, setList, item) {
+    setList(list.includes(item) ? list.filter((x) => x !== item) : [...list, item]);
+  }
+
+  function useCheckinAsInput() {
+    const text = formatCheckin(checkinFeelings, checkinContexts, input);
+    setInput(text);
+  }
+
+  // ============================================================================
   // CHAT
   // ============================================================================
   async function sendMessage() {
@@ -183,6 +223,8 @@ export default function PM1App() {
     let next = { ...profile, threads: { ...profile.threads, [activeThread.id]: threadWithMsg } };
     persist(next);
     setInput("");
+    setCheckinFeelings([]);
+    setCheckinContexts([]);
     setLoading(true);
 
     try {
@@ -223,28 +265,18 @@ export default function PM1App() {
   }
 
   // ============================================================================
-  // COMPROMISO
+  // COMPROMISO — instantáneo, sin modal. Tocar "Comprometerme" activa la misión ya.
   // ============================================================================
-  function openCommitStep(actionText) {
-    setCommitStep({ actionText });
-    setCommitTime("");
-    setCommitObstacle("");
-  }
-
-  function confirmCommitment() {
-    if (!commitStep || !commitTime.trim() || !commitObstacle.trim() || !activeThread) return;
-    const next = addMission(profile, activeThread.id, commitStep.actionText, commitTime.trim(), commitObstacle.trim());
-    persist(next);
-    setCommitStep(null);
-    setCommitTime("");
-    setCommitObstacle("");
+  function handleCommit(actionText) {
+    if (!activeThread) return;
+    persist(addMission(profile, activeThread.id, actionText));
   }
 
   // ============================================================================
   // RESOLUCIÓN DE MISIÓN
   // ============================================================================
-  function resolveActiveMission(threadId, missionId, executed) {
-    let next = resolveMission(profile, threadId, missionId, executed);
+  function finalizeResolution(threadId, missionId, executed, obstacle = null) {
+    let next = resolveMission(profile, threadId, missionId, executed, obstacle);
     let thread = next.threads[threadId];
 
     if (!executed) {
@@ -257,14 +289,15 @@ export default function PM1App() {
 
     persist(next);
     setConfrontMission(null);
+    setObstacleCapture(null);
   }
 
-  function handleExtend(threadId, missionId) {
-    const next = extendMissionOnce(profile, threadId, missionId);
-    const thread = next.threads[threadId];
-    const missions = thread.missions.map((m) => (m.id === missionId ? { ...m, commitTime: "23:59" } : m));
-    persist({ ...next, threads: { ...next.threads, [threadId]: { ...thread, missions } } });
-    setConfrontMission(null);
+  function handleYes(threadId, missionId) {
+    finalizeResolution(threadId, missionId, true, null);
+  }
+
+  function handleNo(threadId, missionId, context) {
+    setObstacleCapture({ threadId, missionId, context });
   }
 
   function handleHypothesisAnswer(threadId, confirmed) {
@@ -289,7 +322,7 @@ export default function PM1App() {
   function resetAll() {
     persist(buildProfile());
     setConfrontMission(null);
-    setCommitStep(null);
+    setObstacleCapture(null);
     setView("map");
   }
 
@@ -304,52 +337,36 @@ export default function PM1App() {
   const allDecreePrograms = useMemo(() => getAllDecreePrograms(profile), [profile]);
 
   // ==========================================================================
-  // CONFRONTACIÓN (bloqueante)
+  // CONFRONTACIÓN (bloqueante, solo para misiones de días anteriores)
   // ==========================================================================
   if (confrontMission) {
     const { threadId, mission } = confrontMission;
     const thread = profile.threads[threadId];
+    const capturing = obstacleCapture && obstacleCapture.missionId === mission.id;
     return (
       <div style={styles.root}>
         <div style={styles.confrontOverlay}>
           <span style={styles.confrontLabel}>PENDIENTE SIN RESOLVER</span>
           <h2 style={styles.confrontTitle}>"{thread?.title}"</h2>
           <p style={styles.confrontAction}>{mission.action}</p>
-          <p style={styles.confrontDetail}>
-            Dijiste que lo harías a las <b>{mission.commitTime}</b>, y que{" "}
-            <b>"{mission.obstacle}"</b> no te lo iba a impedir.
-          </p>
-          <p style={styles.confrontQuestion}>¿Qué pasó?</p>
-          <div style={styles.confrontBtns}>
-            <button style={{ ...styles.combatBtn, ...styles.combatBtnYes }} onClick={() => resolveActiveMission(threadId, mission.id, true)}>Sí, lo hice</button>
-            <button style={{ ...styles.combatBtn, ...styles.combatBtnNo }} onClick={() => resolveActiveMission(threadId, mission.id, false)}>No pude</button>
-          </div>
-          {!mission.extensionUsed && (
-            <button style={styles.confrontExtend} onClick={() => handleExtend(threadId, mission.id)}>
-              Necesito hasta el final del día (solo una vez)
-            </button>
+          {!capturing ? (
+            <>
+              <p style={styles.confrontQuestion}>¿Lo hiciste?</p>
+              <div style={styles.confrontBtns}>
+                <button style={{ ...styles.combatBtn, ...styles.combatBtnYes }} onClick={() => handleYes(threadId, mission.id)}>Sí, lo hice</button>
+                <button style={{ ...styles.combatBtn, ...styles.combatBtnNo }} onClick={() => handleNo(threadId, mission.id, "confront")}>No pude</button>
+              </div>
+            </>
+          ) : (
+            <ObstacleCapture
+              onConfirm={(text) => finalizeResolution(threadId, mission.id, false, text || null)}
+              onSkip={() => finalizeResolution(threadId, mission.id, false, null)}
+            />
           )}
         </div>
       </div>
     );
   }
-
-  const commitModal = commitStep && (
-    <div style={styles.commitOverlay}>
-      <div style={styles.commitCard}>
-        <span style={styles.confrontLabel}>ANTES DE QUE CUENTE COMO COMBATE</span>
-        <p style={styles.commitAction}>{commitStep.actionText}</p>
-        <label style={styles.commitLabel}>¿A qué hora exacta lo vas a hacer?</label>
-        <input style={styles.commitInput} type="time" value={commitTime} onChange={(e) => setCommitTime(e.target.value)} />
-        <label style={styles.commitLabel}>¿Qué es lo primero que te va a dar excusa para no hacerlo?</label>
-        <textarea style={styles.commitTextarea} rows={2} value={commitObstacle} onChange={(e) => setCommitObstacle(e.target.value)} placeholder="Sé específico. Nómbralo ahora para que pierda fuerza después." />
-        <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-          <button style={{ ...styles.combatBtn, ...styles.combatBtnYes, opacity: commitTime && commitObstacle.trim() ? 1 : 0.4 }} disabled={!commitTime || !commitObstacle.trim()} onClick={confirmCommitment}>Confirmar compromiso</button>
-          <button style={{ ...styles.combatBtn, ...styles.combatBtnNo }} onClick={() => setCommitStep(null)}>Todavía no</button>
-        </div>
-      </div>
-    </div>
-  );
 
   // ==========================================================================
   // MAPA
@@ -357,7 +374,6 @@ export default function PM1App() {
   if (view === "map") {
     return (
       <div style={styles.root}>
-        {commitModal}
         <div style={styles.header}>
           <div style={styles.headerLeft}>
             <span style={styles.logo}>PM1</span>
@@ -422,7 +438,7 @@ export default function PM1App() {
   }
 
   // ==========================================================================
-  // ESPEJO — calendario de rachas + espejo de patrón + actividad semanal
+  // ESPEJO
   // ==========================================================================
   if (view === "mirror") {
     const weekdays = ["L", "M", "X", "J", "V", "S", "D"];
@@ -519,7 +535,7 @@ export default function PM1App() {
   }
 
   // ==========================================================================
-  // DECRETOS — todos los hilos juntos
+  // DECRETOS
   // ==========================================================================
   if (view === "decrees") {
     return (
@@ -663,10 +679,11 @@ export default function PM1App() {
 
   const stale = shouldSuggestResume(activeThread);
   const showResumeBanner = stale && !dismissedResume[activeThread.id];
+  const showCheckinChips = activeThread.messages.length === 0;
+  const barCapturing = obstacleCapture && pendingMissionInThread && obstacleCapture.missionId === pendingMissionInThread.id;
 
   return (
     <div style={styles.root}>
-      {commitModal}
       <div style={styles.header}>
         <div style={styles.headerLeft}>
           <button style={styles.backBtn} onClick={() => setView("map")}>←</button>
@@ -698,11 +715,43 @@ export default function PM1App() {
             </div>
           )}
 
-          {activeThread.messages.length === 0 && (
+          {showCheckinChips && (
+            <div style={styles.checkinCard}>
+              <span style={styles.sectionLabel}>CHECK-IN RÁPIDO — TOCA, NO ESCRIBAS</span>
+              <p style={styles.checkinQuestion}>¿Cómo te sientes ahora mismo?</p>
+              <div style={styles.chipRow}>
+                {FEELING_CHIPS.map((f) => (
+                  <button
+                    key={f}
+                    style={{ ...styles.chip, ...(checkinFeelings.includes(f) ? styles.chipActive : {}) }}
+                    onClick={() => toggleChip(checkinFeelings, setCheckinFeelings, f)}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+              <p style={styles.checkinQuestion}>¿Dónde/con quién estás?</p>
+              <div style={styles.chipRow}>
+                {CONTEXT_CHIPS.map((c) => (
+                  <button
+                    key={c}
+                    style={{ ...styles.chip, ...(checkinContexts.includes(c) ? styles.chipActive : {}) }}
+                    onClick={() => toggleChip(checkinContexts, setCheckinContexts, c)}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+              {(checkinFeelings.length > 0 || checkinContexts.length > 0) && (
+                <button style={styles.checkinUseBtn} onClick={useCheckinAsInput}>Usar esto para empezar →</button>
+              )}
+            </div>
+          )}
+
+          {activeThread.messages.length === 0 && !showCheckinChips && (
             <div style={styles.emptyState}>
               <div style={styles.emptyIcon}>⚔</div>
               <p style={styles.emptyTitle}>¿Qué es eso que quieres y no puedes hacer?</p>
-              <p style={styles.emptyText}>Escríbelo como se te venga. Sin filtros, sin justificaciones. Solo lo que está pasando.</p>
             </div>
           )}
 
@@ -734,7 +783,7 @@ export default function PM1App() {
                     <div style={styles.combatTag}>
                       <span style={styles.combatTagLabel}>PRIMER COMBATE PROPUESTO</span>
                       <span style={styles.combatTagText}>{msg.proposedCombat}</span>
-                      <button style={styles.commitBtn} onClick={() => openCommitStep(msg.proposedCombat)}>Comprometerme →</button>
+                      <button style={styles.commitBtn} onClick={() => handleCommit(msg.proposedCombat)}>Me comprometo →</button>
                     </div>
                   )}
                 </div>
@@ -758,12 +807,19 @@ export default function PM1App() {
 
         {pendingMissionInThread && (
           <div style={styles.combatBar}>
-            <p style={styles.combatBarQuestion}>Comprometido para las {pendingMissionInThread.commitTime} — ¿lo ejecutaste?</p>
+            <p style={styles.combatBarQuestion}>¿Ya lo hiciste?</p>
             <p style={styles.combatBarAction}>{pendingMissionInThread.action}</p>
-            <div style={styles.combatBarBtns}>
-              <button style={{ ...styles.combatBtn, ...styles.combatBtnYes }} onClick={() => resolveActiveMission(activeThread.id, pendingMissionInThread.id, true)}>Sí, lo hice</button>
-              <button style={{ ...styles.combatBtn, ...styles.combatBtnNo }} onClick={() => resolveActiveMission(activeThread.id, pendingMissionInThread.id, false)}>No pude</button>
-            </div>
+            {!barCapturing ? (
+              <div style={styles.combatBarBtns}>
+                <button style={{ ...styles.combatBtn, ...styles.combatBtnYes }} onClick={() => handleYes(activeThread.id, pendingMissionInThread.id)}>Sí, lo hice</button>
+                <button style={{ ...styles.combatBtn, ...styles.combatBtnNo }} onClick={() => handleNo(activeThread.id, pendingMissionInThread.id, "bar")}>No pude</button>
+              </div>
+            ) : (
+              <ObstacleCapture
+                onConfirm={(text) => finalizeResolution(activeThread.id, pendingMissionInThread.id, false, text || null)}
+                onSkip={() => finalizeResolution(activeThread.id, pendingMissionInThread.id, false, null)}
+              />
+            )}
           </div>
         )}
 
@@ -814,7 +870,6 @@ const styles = {
 
   bottomNav: { position: "absolute", bottom: 0, left: 0, right: 0, display: "flex", borderTop: "1px solid #1a1a1a", background: "#0a0a0a", flexShrink: 0 },
   bottomNavBtn: { flex: 1, background: "none", border: "none", padding: "10px 4px 12px", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, cursor: "pointer" },
-  bottomNavBtnActive: {},
   bottomNavIcon: { fontSize: 18 },
   bottomNavLabel: { fontSize: 10, fontFamily: "'Space Mono', monospace", letterSpacing: "0.5px" },
 
@@ -832,7 +887,7 @@ const styles = {
   threadProgressTrack: { height: 3, background: "#1a1a1a", borderRadius: 2, overflow: "hidden" },
   threadProgressFill: { height: "100%", borderRadius: 2, transition: "width 0.4s ease" },
 
-  emptyState: { textAlign: "center", padding: "60px 20px", margin: "auto", maxWidth: 360 },
+  emptyState: { textAlign: "center", padding: "40px 20px", margin: "auto", maxWidth: 360 },
   emptyIcon: { fontSize: 40, marginBottom: 16, filter: "grayscale(1)", opacity: 0.4 },
   emptyTitle: { fontSize: 18, fontWeight: 600, color: "#888", marginBottom: 10 },
   emptyText: { fontSize: 13, color: "#444", lineHeight: 1.7 },
@@ -844,6 +899,13 @@ const styles = {
   bubbleUser: { background: "#141414", border: "1px solid #222", borderBottomRightRadius: 2 },
   bubbleAI: { background: "#0f0f0f", border: "1px solid #1e1e1e", borderBottomLeftRadius: 2 },
   bubbleText: { fontSize: 14, color: "#d4d4d4", whiteSpace: "pre-wrap", lineHeight: 1.7 },
+
+  checkinCard: { padding: "18px 18px", background: "#0d0d0d", border: "1px solid #1a1a1a", borderRadius: 10, display: "flex", flexDirection: "column", gap: 8 },
+  checkinQuestion: { fontSize: 13, color: "#999", marginTop: 6 },
+  chipRow: { display: "flex", flexWrap: "wrap", gap: 8 },
+  chip: { background: "#141414", border: "1px solid #262626", color: "#999", fontSize: 12.5, padding: "7px 13px", borderRadius: 20, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
+  chipActive: { background: "rgba(200,245,66,0.12)", border: "1px solid #c8f542", color: "#c8f542" },
+  checkinUseBtn: { marginTop: 10, background: "#c8f542", color: "#0a0a0a", border: "none", borderRadius: 8, padding: "10px", fontSize: 13, fontWeight: 600, cursor: "pointer" },
 
   combatTag: { marginTop: 12, padding: "10px 12px", background: "rgba(200,245,66,0.06)", border: "1px solid rgba(200,245,66,0.2)", borderRadius: 6, display: "flex", flexDirection: "column", gap: 8 },
   combatTagLabel: { display: "block", fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#c8f542", letterSpacing: "2px" },
@@ -881,6 +943,11 @@ const styles = {
   combatBtnYes: { background: "rgba(74,222,128,0.15)", color: "#4ade80", border: "1px solid rgba(74,222,128,0.25)" },
   combatBtnNo: { background: "rgba(248,113,113,0.1)", color: "#f87171", border: "1px solid rgba(248,113,113,0.2)" },
 
+  obstacleCapture: { display: "flex", flexDirection: "column", gap: 8, marginTop: 6 },
+  obstacleQuestion: { fontSize: 13, color: "#ccc" },
+  obstacleInput: { background: "#0a0a0a", border: "1px solid #222", borderRadius: 6, color: "#e8e8e8", fontSize: 13, padding: "9px 12px", fontFamily: "'Space Grotesk', sans-serif" },
+  obstacleSkipBtn: { flex: 1, background: "none", border: "1px solid #222", color: "#666", padding: "9px", borderRadius: 5, fontSize: 12, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
+
   decreeBar: { margin: "0 16px 12px", padding: "14px 16px", background: "#0d0d0d", border: "1px solid rgba(96,165,250,0.2)", borderRadius: 8, flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 },
   decreeProgramRow: { display: "flex", flexDirection: "column", gap: 6 },
   decreeText: { fontSize: 12.5, color: "#93c5fd", fontStyle: "italic" },
@@ -901,17 +968,8 @@ const styles = {
   confrontLabel: { fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#f87171", letterSpacing: "3px" },
   confrontTitle: { fontSize: 18, color: "#888", margin: "8px 0 4px", fontWeight: 500 },
   confrontAction: { fontSize: 20, color: "#e8e8e8", fontWeight: 600, lineHeight: 1.4, margin: "6px 0 16px" },
-  confrontDetail: { fontSize: 14, color: "#999", lineHeight: 1.7, marginBottom: 18 },
   confrontQuestion: { fontSize: 16, color: "#c8f542", fontWeight: 600, marginBottom: 16 },
   confrontBtns: { display: "flex", gap: 10 },
-  confrontExtend: { marginTop: 16, background: "none", border: "1px solid #222", color: "#555", padding: "10px", borderRadius: 6, fontSize: 12, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
-
-  commitOverlay: { position: "absolute", inset: 0, background: "rgba(10,10,10,0.92)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, zIndex: 9 },
-  commitCard: { background: "#0d0d0d", border: "1px solid #222", borderRadius: 12, padding: "24px 22px", width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 4 },
-  commitAction: { fontSize: 16, color: "#c8f542", fontWeight: 600, lineHeight: 1.5, margin: "10px 0 18px" },
-  commitLabel: { fontSize: 12, color: "#888", marginTop: 12, marginBottom: 6 },
-  commitInput: { background: "#0a0a0a", border: "1px solid #222", borderRadius: 6, color: "#e8e8e8", fontSize: 14, padding: "9px 12px", fontFamily: "'Space Grotesk', sans-serif" },
-  commitTextarea: { background: "#0a0a0a", border: "1px solid #222", borderRadius: 6, color: "#e8e8e8", fontSize: 13, padding: "9px 12px", resize: "none", fontFamily: "'Space Grotesk', sans-serif", lineHeight: 1.5 },
 
   identityCard: { padding: "20px", background: "#0d0d0d", border: "1px solid #1e1e1e", borderRadius: 10 },
   identityLabel: { display: "block", fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#444", letterSpacing: "3px", marginBottom: 10 },
