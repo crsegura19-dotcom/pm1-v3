@@ -17,7 +17,6 @@ import {
   maybeGenerateHypothesis,
   resolveHypothesis,
   startDecreeProgram,
-  logDecreeCheckin,
   decreeProgramProgress,
   generateEvolutionReport,
   generatePatternMirror,
@@ -33,7 +32,6 @@ import {
   confirmThreadTitle,
   dismissSuggestedTitle,
   uid,
-  isDecreeSlotCheckedToday,
   decreeDayNumber,
 } from "../lib/pm1-engine";
 
@@ -212,6 +210,7 @@ export default function PM1App() {
   const [confrontMission, setConfrontMission] = useState(null);
   const [dismissedResume, setDismissedResume] = useState({});
   const [evolutionOpenThreadId, setEvolutionOpenThreadId] = useState(null);
+  const [openDecreeIds, setOpenDecreeIds] = useState([]);
   const [calendarOffset, setCalendarOffset] = useState(0);
   const [obstacleCapture, setObstacleCapture] = useState(null); // { threadId, missionId, context: 'confront'|'bar' }
   const [checkinFeelings, setCheckinFeelings] = useState([]);
@@ -444,8 +443,8 @@ export default function PM1App() {
     persist(startDecreeProgram(profile, activeThread.id));
   }
 
-  function handleDecreeCheckin(threadId, programId, slot) {
-    persist(logDecreeCheckin(profile, threadId, programId, slot));
+  function toggleDecreeOpen(id) {
+    setOpenDecreeIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
   }
 
   // ============================================================================
@@ -697,32 +696,22 @@ export default function PM1App() {
           ) : (
             allDecreePrograms.map((p) => {
               const pct = decreeProgramProgress(p);
-              const doneAM = isDecreeSlotCheckedToday(p, "manana");
-              const donePM = isDecreeSlotCheckedToday(p, "noche");
+              const open = openDecreeIds.includes(p.id);
               return (
                 <div key={p.id} style={styles.decreeCard}>
-                  <div style={styles.decreeCardHeader}>
-                    <span style={{ ...styles.decreeThreadTag, color: p.threadColor, borderColor: p.threadColor }}>{p.threadTitle}</span>
+                  <button style={styles.decreeCardHeader} onClick={() => toggleDecreeOpen(p.id)}>
+                    <span style={styles.decreeCardHeaderLeft}>
+                      <span style={styles.decreeChevron}>{open ? "▾" : "▸"}</span>
+                      <span style={{ ...styles.decreeThreadTag, color: p.threadColor, borderColor: p.threadColor }}>{p.threadTitle}</span>
+                    </span>
                     <span style={styles.decreeProgress}>Día {decreeDayNumber(p)} de {p.durationDays}</span>
-                  </div>
-                  {p.texts.map((t, i) => <p key={i} style={styles.decreeCardText}>"{t}"</p>)}
-                  <Bar pct={pct} color="#60a5fa" />
-                  <div style={styles.resumeBannerBtns}>
-                    <button
-                      style={{ ...styles.resumeBtnSmall, ...(doneAM ? styles.decreeDoneBtn : {}) }}
-                      disabled={doneAM}
-                      onClick={() => handleDecreeCheckin(p.threadId, p.id, "manana")}
-                    >
-                      {doneAM ? "✓ Mañana marcada" : "Marcar mañana"}
-                    </button>
-                    <button
-                      style={{ ...styles.resumeBtnSmall, ...(donePM ? styles.decreeDoneBtn : {}) }}
-                      disabled={donePM}
-                      onClick={() => handleDecreeCheckin(p.threadId, p.id, "noche")}
-                    >
-                      {donePM ? "✓ Noche marcada" : "Marcar noche"}
-                    </button>
-                  </div>
+                  </button>
+                  {open && (
+                    <>
+                      {p.texts.map((t, i) => <p key={i} style={styles.decreeCardText}>"{t}"</p>)}
+                      <Bar pct={pct} color="#60a5fa" />
+                    </>
+                  )}
                 </div>
               );
             })
@@ -1016,29 +1005,21 @@ export default function PM1App() {
           <div style={styles.decreeBar}>
             <span style={styles.sectionLabel}>DECRETOS ACTIVOS EN ESTE COMBATE</span>
             {activeDecreePrograms.map((p) => {
-              const doneAM = isDecreeSlotCheckedToday(p, "manana");
-              const donePM = isDecreeSlotCheckedToday(p, "noche");
+              const open = openDecreeIds.includes(p.id);
               return (
                 <div key={p.id} style={styles.decreeProgramRow}>
-                  {p.texts.map((t, i) => <p key={i} style={styles.decreeText}>"{t}"</p>)}
-                  <p style={styles.decreeDayLabel}>Día {decreeDayNumber(p)} de {p.durationDays}</p>
-                  <Bar pct={decreeProgramProgress(p)} color="#60a5fa" />
-                  <div style={styles.resumeBannerBtns}>
-                    <button
-                      style={{ ...styles.resumeBtnSmall, ...(doneAM ? styles.decreeDoneBtn : {}) }}
-                      disabled={doneAM}
-                      onClick={() => handleDecreeCheckin(activeThread.id, p.id, "manana")}
-                    >
-                      {doneAM ? "✓ Mañana marcada" : "Marcar mañana"}
-                    </button>
-                    <button
-                      style={{ ...styles.resumeBtnSmall, ...(donePM ? styles.decreeDoneBtn : {}) }}
-                      disabled={donePM}
-                      onClick={() => handleDecreeCheckin(activeThread.id, p.id, "noche")}
-                    >
-                      {donePM ? "✓ Noche marcada" : "Marcar noche"}
-                    </button>
-                  </div>
+                  <button style={styles.decreeCardHeader} onClick={() => toggleDecreeOpen(p.id)}>
+                    <span style={styles.decreeCardHeaderLeft}>
+                      <span style={styles.decreeChevron}>{open ? "▾" : "▸"}</span>
+                      <span style={styles.decreeDayLabel}>Día {decreeDayNumber(p)} de {p.durationDays}</span>
+                    </span>
+                  </button>
+                  {open && (
+                    <>
+                      {p.texts.map((t, i) => <p key={i} style={styles.decreeText}>"{t}"</p>)}
+                      <Bar pct={decreeProgramProgress(p)} color="#60a5fa" />
+                    </>
+                  )}
                 </div>
               );
             })}
@@ -1176,10 +1157,11 @@ const styles = {
   decreeStartBtn: { width: "100%", background: "none", border: "1px dashed #333", color: "#666", padding: "10px", borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
 
   decreeCard: { padding: "16px 18px", background: "#0d0d0d", border: "1px solid #1a1a1a", borderRadius: 10, display: "flex", flexDirection: "column", gap: 8 },
-  decreeCardHeader: { display: "flex", alignItems: "center", justifyContent: "space-between" },
+  decreeCardHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
+  decreeCardHeaderLeft: { display: "flex", alignItems: "center", gap: 8 },
+  decreeChevron: { color: "#555", fontSize: 12, width: 12, display: "inline-block" },
   decreeThreadTag: { fontSize: 11, padding: "3px 8px", borderRadius: 4, border: "1px solid", fontFamily: "'Space Mono', monospace" },
   decreeProgress: { fontSize: 12, color: "#666", fontFamily: "'Space Mono', monospace" },
-  decreeDoneBtn: { opacity: 0.5, cursor: "default", color: "#4ade80", borderColor: "rgba(74,222,128,0.3)" },
   decreeDayLabel: { fontSize: 11, color: "#555", fontFamily: "'Space Mono', monospace" },
   decreeCardText: { fontSize: 13, color: "#93c5fd", fontStyle: "italic", lineHeight: 1.5 },
 
