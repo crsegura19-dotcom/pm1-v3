@@ -115,9 +115,53 @@ function ObstacleCapture({ onConfirm, onSkip }) {
   );
 }
 
-// ============================================================================
-// APP PRINCIPAL
-// ============================================================================
+// Fila de chips con opción de añadir uno propio, tipo LIBEN ("+"). No sustituye
+// el texto libre, solo evita escribir cuando la opción ya existe en la lista.
+function ChipRow({ items, selected, onToggle, onAddCustom }) {
+  const [adding, setAdding] = useState(false);
+  const [text, setText] = useState("");
+
+  function submit() {
+    const v = text.trim();
+    if (v) onAddCustom(v);
+    setText("");
+    setAdding(false);
+  }
+
+  return (
+    <div style={styles.chipRow}>
+      {items.map((item) => (
+        <button
+          key={item}
+          style={{ ...styles.chip, ...(selected.includes(item) ? styles.chipActive : {}) }}
+          onClick={() => onToggle(item)}
+        >
+          {item}
+        </button>
+      ))}
+      {!adding ? (
+        <button style={styles.chipAddBtn} onClick={() => setAdding(true)}>+ Añadir</button>
+      ) : (
+        <div style={styles.chipAddRow}>
+          <input
+            style={styles.chipAddInput}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submit();
+              if (e.key === "Escape") { setAdding(false); setText(""); }
+            }}
+            placeholder="Escribe y pulsa Enter"
+            autoFocus
+          />
+          <button style={styles.chipAddConfirm} onClick={submit}>✓</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 
 export default function PM1App() {
   const [view, setView] = useState("map");
@@ -132,6 +176,8 @@ export default function PM1App() {
   const [obstacleCapture, setObstacleCapture] = useState(null); // { threadId, missionId, context: 'confront'|'bar' }
   const [checkinFeelings, setCheckinFeelings] = useState([]);
   const [checkinContexts, setCheckinContexts] = useState([]);
+  const [customFeelings, setCustomFeelings] = useState([]);
+  const [customContexts, setCustomContexts] = useState([]);
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -206,6 +252,16 @@ export default function PM1App() {
   // ============================================================================
   function toggleChip(list, setList, item) {
     setList(list.includes(item) ? list.filter((x) => x !== item) : [...list, item]);
+  }
+
+  function addCustomFeeling(value) {
+    setCustomFeelings((c) => (c.includes(value) ? c : [...c, value]));
+    setCheckinFeelings((c) => (c.includes(value) ? c : [...c, value]));
+  }
+
+  function addCustomContext(value) {
+    setCustomContexts((c) => (c.includes(value) ? c : [...c, value]));
+    setCheckinContexts((c) => (c.includes(value) ? c : [...c, value]));
   }
 
   function useCheckinAsInput() {
@@ -719,29 +775,19 @@ export default function PM1App() {
             <div style={styles.checkinCard}>
               <span style={styles.sectionLabel}>CHECK-IN RÁPIDO — TOCA, NO ESCRIBAS</span>
               <p style={styles.checkinQuestion}>¿Cómo te sientes ahora mismo?</p>
-              <div style={styles.chipRow}>
-                {FEELING_CHIPS.map((f) => (
-                  <button
-                    key={f}
-                    style={{ ...styles.chip, ...(checkinFeelings.includes(f) ? styles.chipActive : {}) }}
-                    onClick={() => toggleChip(checkinFeelings, setCheckinFeelings, f)}
-                  >
-                    {f}
-                  </button>
-                ))}
-              </div>
+              <ChipRow
+                items={[...FEELING_CHIPS, ...customFeelings]}
+                selected={checkinFeelings}
+                onToggle={(f) => toggleChip(checkinFeelings, setCheckinFeelings, f)}
+                onAddCustom={addCustomFeeling}
+              />
               <p style={styles.checkinQuestion}>¿Dónde/con quién estás?</p>
-              <div style={styles.chipRow}>
-                {CONTEXT_CHIPS.map((c) => (
-                  <button
-                    key={c}
-                    style={{ ...styles.chip, ...(checkinContexts.includes(c) ? styles.chipActive : {}) }}
-                    onClick={() => toggleChip(checkinContexts, setCheckinContexts, c)}
-                  >
-                    {c}
-                  </button>
-                ))}
-              </div>
+              <ChipRow
+                items={[...CONTEXT_CHIPS, ...customContexts]}
+                selected={checkinContexts}
+                onToggle={(c) => toggleChip(checkinContexts, setCheckinContexts, c)}
+                onAddCustom={addCustomContext}
+              />
               {(checkinFeelings.length > 0 || checkinContexts.length > 0) && (
                 <button style={styles.checkinUseBtn} onClick={useCheckinAsInput}>Usar esto para empezar →</button>
               )}
@@ -905,6 +951,10 @@ const styles = {
   chipRow: { display: "flex", flexWrap: "wrap", gap: 8 },
   chip: { background: "#141414", border: "1px solid #262626", color: "#999", fontSize: 12.5, padding: "7px 13px", borderRadius: 20, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
   chipActive: { background: "rgba(200,245,66,0.12)", border: "1px solid #c8f542", color: "#c8f542" },
+  chipAddBtn: { background: "none", border: "1px dashed #333", color: "#666", fontSize: 12.5, padding: "7px 13px", borderRadius: 20, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
+  chipAddRow: { display: "flex", gap: 6, alignItems: "center" },
+  chipAddInput: { background: "#0a0a0a", border: "1px solid #c8f542", borderRadius: 20, color: "#e8e8e8", fontSize: 12.5, padding: "7px 13px", fontFamily: "'Space Grotesk', sans-serif", minWidth: 140 },
+  chipAddConfirm: { background: "#c8f542", color: "#0a0a0a", border: "none", borderRadius: "50%", width: 28, height: 28, fontSize: 13, fontWeight: 700, cursor: "pointer", flexShrink: 0 },
   checkinUseBtn: { marginTop: 10, background: "#c8f542", color: "#0a0a0a", border: "none", borderRadius: 8, padding: "10px", fontSize: 13, fontWeight: 600, cursor: "pointer" },
 
   combatTag: { marginTop: 12, padding: "10px 12px", background: "rgba(200,245,66,0.06)", border: "1px solid rgba(200,245,66,0.2)", borderRadius: 6, display: "flex", flexDirection: "column", gap: 8 },
