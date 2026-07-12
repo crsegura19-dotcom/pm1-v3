@@ -24,13 +24,14 @@ import {
   buildStreakCalendar,
   getMechanismFrequencyList,
   getWeeklyActivity,
-  getAllDecreePrograms,
   FEELING_CHIPS,
   CONTEXT_CHIPS,
   formatCheckin,
   STARTER_CHIPS,
+  MOOD_CHIPS,
   confirmThreadTitle,
   dismissSuggestedTitle,
+  deleteThread,
   uid,
   decreeDayNumber,
 } from "../lib/pm1-engine";
@@ -68,9 +69,9 @@ function StatusDot({ status, stale }) {
 
 function BottomNav({ active, onChange }) {
   const items = [
-    { id: "map", label: "Mapa", icon: "⚔" },
+    { id: "map", label: "Inicio", icon: "⌂" },
     { id: "mirror", label: "Espejo", icon: "◈" },
-    { id: "decrees", label: "Decretos", icon: "✦" },
+    { id: "decrees", label: "Mis Combates", icon: "⚔" },
     { id: "profile", label: "Perfil", icon: "●" },
   ];
   return (
@@ -206,6 +207,9 @@ export default function PM1App() {
   const [loading, setLoading] = useState(false);
   const [openingText, setOpeningText] = useState("");
   const [customStarters, setCustomStarters] = useState([]);
+  const [customMoods, setCustomMoods] = useState([]);
+  const [selectedMoods, setSelectedMoods] = useState([]);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [titleNameInput, setTitleNameInput] = useState(null); // threadId cuando el usuario prefiere escribir su propio nombre
   const [confrontMission, setConfrontMission] = useState(null);
   const [dismissedResume, setDismissedResume] = useState({});
@@ -270,6 +274,29 @@ export default function PM1App() {
 
   function insertStarter(phrase) {
     setOpeningText((t) => (t.trim() ? `${t.trim()} ` : `${phrase}: `));
+  }
+
+  // Segundo camino de entrada: selecciona uno o varios ánimos y confirma para
+  // entrar. La IA recibe "Me siento X, Y." y formula la siguiente pregunta
+  // según cómo llega la persona, en vez de pedirle que ya sepa nombrar el problema.
+  function toggleMood(mood) {
+    setSelectedMoods((m) => (m.includes(mood) ? m.filter((x) => x !== mood) : [...m, mood]));
+  }
+
+  function handleMoodStart() {
+    if (!selectedMoods.length) return;
+    const next = addThread(profile);
+    const threadId = next.activeThreadId;
+    const text = `Me siento ${selectedMoods.join(", ").toLowerCase()}.`;
+    persist(next);
+    setSelectedMoods([]);
+    setView("chat");
+    sendMessageTo(threadId, next, text);
+  }
+
+  function handleDeleteThread(threadId) {
+    persist(deleteThread(profile, threadId));
+    setConfirmDeleteId(null);
   }
 
   function openThread(threadId) {
@@ -465,7 +492,10 @@ export default function PM1App() {
   const calendar = useMemo(() => buildStreakCalendar(profile, calendarOffset), [profile, calendarOffset]);
   const mechanismFreq = useMemo(() => getMechanismFrequencyList(profile), [profile]);
   const weeklyActivity = useMemo(() => getWeeklyActivity(profile), [profile]);
-  const allDecreePrograms = useMemo(() => getAllDecreePrograms(profile), [profile]);
+  const recentThreads = useMemo(
+    () => [...threadList].sort((a, b) => new Date(b.lastActivityAt) - new Date(a.lastActivityAt)).slice(0, 3),
+    [threadList]
+  );
 
   // ==========================================================================
   // CONFRONTACIÓN (bloqueante, solo para misiones de días anteriores)
@@ -540,36 +570,44 @@ export default function PM1App() {
             </button>
           </div>
 
-          {threadList.length > 0 && <p style={styles.mapIntro}>Mis Combates</p>}
+          <div style={styles.moodCard}>
+            <p style={styles.moodQuestion}>¿O prefieres indicar cómo te sientes ahora mismo?</p>
+            <p style={styles.starterSub}>Empezamos por ahí, y vamos descubriendo juntos qué es eso que llevas tiempo intentando.</p>
+            <div style={styles.chipRow}>
+              {[...MOOD_CHIPS, ...customMoods].map((m) => (
+                <button
+                  key={m}
+                  style={{ ...styles.chip, ...(selectedMoods.includes(m) ? styles.chipActive : {}) }}
+                  onClick={() => toggleMood(m)}
+                >
+                  {m}
+                </button>
+              ))}
+              <AddChipInline onAdd={(v) => { setCustomMoods((c) => [...c, v]); toggleMood(v); }} />
+            </div>
+            {selectedMoods.length > 0 && (
+              <button style={styles.checkinUseBtn} onClick={handleMoodStart}>Entrar con esto →</button>
+            )}
+          </div>
 
-          {threadList.map((t) => {
-            const stale = shouldSuggestResume(t);
-            const pending = t.missions.find((m) => m.executed === null);
-            const executedCount = t.missions.filter((m) => m.executed).length;
-            return (
-              <div key={t.id} style={styles.threadCard} onClick={() => openThread(t.id)}>
-                <div style={styles.threadCardTop}>
-                  <div style={styles.threadCardTitleRow}>
-                    <StatusDot status={t.status} stale={stale} />
-                    <span style={styles.threadCardTitle}>{t.title}</span>
-                  </div>
-                  <button
-                    style={styles.threadPauseBtn}
-                    onClick={(e) => { e.stopPropagation(); toggleThreadStatus(t.id, t.status); }}
-                  >
-                    {t.status === "paused" ? "reanudar" : "pausar"}
-                  </button>
-                </div>
-                <p style={styles.threadCardMeta}>
-                  {t.status === "paused" ? "Pausado" : pending ? "Misión pendiente" : `${executedCount} movimiento${executedCount === 1 ? "" : "s"} ejecutado${executedCount === 1 ? "" : "s"}`}
-                  {stale ? " · lleva días sin tocarse" : ""}
-                </p>
-                <div style={styles.threadProgressTrack}>
-                  <div style={{ ...styles.threadProgressFill, width: `${t.progress}%`, background: colorForThread(t) }} />
-                </div>
+          {recentThreads.length > 0 && (
+            <div style={styles.section}>
+              <div style={styles.retomarHeader}>
+                <span style={styles.sectionLabel}>RETOMAR</span>
+                <button style={styles.retomarViewAll} onClick={() => goToNav("decrees")}>Ver todos →</button>
               </div>
-            );
-          })}
+              {recentThreads.map((t) => {
+                const pending = t.missions.find((m) => m.executed === null);
+                return (
+                  <div key={t.id} style={styles.retomarRow} onClick={() => openThread(t.id)}>
+                    <StatusDot status={t.status} stale={shouldSuggestResume(t)} />
+                    <span style={styles.retomarTitle}>{t.title}</span>
+                    {pending && <span style={styles.retomarPendingTag}>pendiente</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
         <BottomNav active="map" onChange={goToNav} />
       </div>
@@ -682,40 +720,81 @@ export default function PM1App() {
         <div style={styles.header}>
           <div style={styles.headerLeft}>
             <span style={styles.logo}>PM1</span>
-            <span style={styles.logoSub}>DECRETOS</span>
+            <span style={styles.logoSub}>MIS COMBATES</span>
           </div>
         </div>
 
         <div style={styles.scrollArea}>
-          {allDecreePrograms.length === 0 ? (
+          {threadList.length === 0 && (
             <div style={styles.emptyState}>
-              <div style={styles.emptyIcon}>✦</div>
-              <p style={styles.emptyTitle}>Ningún decreto activo</p>
-              <p style={styles.emptyText}>Los decretos se activan desde un combate, después de resolver tu primera misión ahí. Siempre en positivo — programan tu mente, no la castigan.</p>
+              <div style={styles.emptyIcon}>⚔</div>
+              <p style={styles.emptyTitle}>Ningún combate abierto todavía</p>
+              <p style={styles.emptyText}>Empieza uno desde Inicio.</p>
             </div>
-          ) : (
-            allDecreePrograms.map((p) => {
-              const pct = decreeProgramProgress(p);
-              const open = openDecreeIds.includes(p.id);
-              return (
-                <div key={p.id} style={styles.decreeCard}>
-                  <button style={styles.decreeCardHeader} onClick={() => toggleDecreeOpen(p.id)}>
-                    <span style={styles.decreeCardHeaderLeft}>
-                      <span style={styles.decreeChevron}>{open ? "▾" : "▸"}</span>
-                      <span style={{ ...styles.decreeThreadTag, color: p.threadColor, borderColor: p.threadColor }}>{p.threadTitle}</span>
-                    </span>
-                    <span style={styles.decreeProgress}>Día {decreeDayNumber(p)} de {p.durationDays}</span>
-                  </button>
-                  {open && (
-                    <>
-                      {p.texts.map((t, i) => <p key={i} style={styles.decreeCardText}>"{t}"</p>)}
-                      <Bar pct={pct} color="#60a5fa" />
-                    </>
-                  )}
-                </div>
-              );
-            })
           )}
+
+          {threadList.map((t) => {
+            const stale = shouldSuggestResume(t);
+            const pending = t.missions.find((m) => m.executed === null);
+            const executedCount = t.missions.filter((m) => m.executed).length;
+            const deleting = confirmDeleteId === t.id;
+            return (
+              <div key={t.id} style={styles.threadCard}>
+                <div style={styles.threadCardTop} onClick={() => !deleting && openThread(t.id)}>
+                  <div style={styles.threadCardTitleRow}>
+                    <StatusDot status={t.status} stale={stale} />
+                    <span style={styles.threadCardTitle}>{t.title}</span>
+                  </div>
+                  <button
+                    style={styles.threadPauseBtn}
+                    onClick={(e) => { e.stopPropagation(); toggleThreadStatus(t.id, t.status); }}
+                  >
+                    {t.status === "paused" ? "reanudar" : "pausar"}
+                  </button>
+                </div>
+                <p style={styles.threadCardMeta} onClick={() => !deleting && openThread(t.id)}>
+                  {t.status === "paused" ? "Pausado" : pending ? "Misión pendiente" : `${executedCount} movimiento${executedCount === 1 ? "" : "s"} ejecutado${executedCount === 1 ? "" : "s"}`}
+                  {stale ? " · lleva días sin tocarse" : ""}
+                </p>
+                <div style={styles.threadProgressTrack} onClick={() => !deleting && openThread(t.id)}>
+                  <div style={{ ...styles.threadProgressFill, width: `${t.progress}%`, background: colorForThread(t) }} />
+                </div>
+
+                {t.decreePrograms.length > 0 && t.decreePrograms.map((p) => {
+                  const open = openDecreeIds.includes(p.id);
+                  return (
+                    <div key={p.id} style={styles.decreeSubCard}>
+                      <button style={styles.decreeCardHeader} onClick={() => toggleDecreeOpen(p.id)}>
+                        <span style={styles.decreeCardHeaderLeft}>
+                          <span style={styles.decreeChevron}>{open ? "▾" : "▸"}</span>
+                          <span style={styles.decreeSubLabel}>Decretos</span>
+                        </span>
+                        <span style={styles.decreeProgress}>Día {decreeDayNumber(p)} de {p.durationDays}</span>
+                      </button>
+                      {open && (
+                        <>
+                          {p.texts.map((txt, i) => <p key={i} style={styles.decreeCardText}>"{txt}"</p>)}
+                          <Bar pct={decreeProgramProgress(p)} color="#60a5fa" />
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {!deleting ? (
+                  <button style={styles.threadDeleteBtn} onClick={() => setConfirmDeleteId(t.id)}>Eliminar combate</button>
+                ) : (
+                  <div style={styles.resetConfirm}>
+                    <span style={styles.resetConfirmText}>¿Seguro? Se perderá todo el progreso de "{t.title}".</span>
+                    <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                      <button style={styles.resetConfirmYes} onClick={() => handleDeleteThread(t.id)}>Sí, eliminar</button>
+                      <button style={styles.resetConfirmNo} onClick={() => setConfirmDeleteId(null)}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
         <BottomNav active="decrees" onChange={goToNav} />
       </div>
@@ -1068,6 +1147,15 @@ const styles = {
   starterTextarea: { background: "#0a0a0a", border: "1px solid #222", borderRadius: 8, color: "#e8e8e8", fontSize: 14, padding: "12px 14px", resize: "none", lineHeight: 1.6, fontFamily: "'Space Grotesk', sans-serif", marginTop: 4 },
   starterBtn: { width: "100%", padding: "12px", fontSize: 13.5 },
 
+  moodCard: { padding: "18px 20px", background: "#0d0d0d", border: "1px solid #1e1e1e", borderRadius: 12, display: "flex", flexDirection: "column", gap: 8 },
+  moodQuestion: { fontSize: 14.5, fontWeight: 600, color: "#ccc" },
+
+  retomarHeader: { display: "flex", alignItems: "center", justifyContent: "space-between" },
+  retomarViewAll: { background: "none", border: "none", color: "#666", fontSize: 11.5, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
+  retomarRow: { display: "flex", alignItems: "center", gap: 9, padding: "8px 2px", cursor: "pointer" },
+  retomarTitle: { fontSize: 13.5, color: "#ccc", flex: 1 },
+  retomarPendingTag: { fontSize: 10, color: "#c8f542", fontFamily: "'Space Mono', monospace", letterSpacing: "0.5px" },
+
   titleSuggestBanner: { margin: "10px 16px 0", padding: "12px 14px", background: "#0d0d0d", border: "1px solid rgba(200,245,66,0.35)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 6, flexShrink: 0, boxShadow: "0 4px 14px rgba(200,245,66,0.08)" },
   titleSuggestHeader: { display: "flex", alignItems: "center", gap: 7 },
   titleSuggestPulseDot: { width: 7, height: 7, borderRadius: "50%", background: "#c8f542", animation: "pulse 1.2s ease-in-out infinite", flexShrink: 0 },
@@ -1157,6 +1245,9 @@ const styles = {
   decreeStartBtn: { width: "100%", background: "none", border: "1px dashed #333", color: "#666", padding: "10px", borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
 
   decreeCard: { padding: "16px 18px", background: "#0d0d0d", border: "1px solid #1a1a1a", borderRadius: 10, display: "flex", flexDirection: "column", gap: 8 },
+  decreeSubCard: { marginTop: 4, paddingTop: 10, borderTop: "1px solid #1a1a1a", display: "flex", flexDirection: "column", gap: 8 },
+  decreeSubLabel: { fontSize: 11.5, color: "#93c5fd" },
+  threadDeleteBtn: { marginTop: 4, background: "none", border: "none", color: "#3a3a3a", fontSize: 11, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif", alignSelf: "flex-start", padding: "4px 0" },
   decreeCardHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
   decreeCardHeaderLeft: { display: "flex", alignItems: "center", gap: 8 },
   decreeChevron: { color: "#555", fontSize: 12, width: 12, display: "inline-block" },
