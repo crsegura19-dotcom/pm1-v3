@@ -29,6 +29,9 @@ import {
   FEELING_CHIPS,
   CONTEXT_CHIPS,
   formatCheckin,
+  STARTER_CHIPS,
+  confirmThreadTitle,
+  dismissSuggestedTitle,
 } from "../lib/pm1-engine";
 
 // ============================================================================
@@ -161,14 +164,48 @@ function ChipRow({ items, selected, onToggle, onAddCustom }) {
   );
 }
 
+// Botón "+" independiente, para chips que insertan texto en vez de seleccionar
+// (p.ej. los chips de arranque). Reutiliza el mismo patrón visual que ChipRow.
+function AddChipInline({ onAdd }) {
+  const [adding, setAdding] = useState(false);
+  const [text, setText] = useState("");
 
+  function submit() {
+    const v = text.trim();
+    if (v) onAdd(v);
+    setText("");
+    setAdding(false);
+  }
+
+  if (!adding) {
+    return <button style={styles.chipAddBtn} onClick={() => setAdding(true)}>+ Añadir</button>;
+  }
+  return (
+    <div style={styles.chipAddRow}>
+      <input
+        style={styles.chipAddInput}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") submit();
+          if (e.key === "Escape") { setAdding(false); setText(""); }
+        }}
+        placeholder="Es otra cosa: descríbela..."
+        autoFocus
+      />
+      <button style={styles.chipAddConfirm} onClick={submit}>✓</button>
+    </div>
+  );
+}
 
 export default function PM1App() {
   const [view, setView] = useState("map");
   const [profile, setProfile] = useState(buildProfile);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [newThreadTitle, setNewThreadTitle] = useState("");
+  const [openingText, setOpeningText] = useState("");
+  const [customStarters, setCustomStarters] = useState([]);
+  const [titleNameInput, setTitleNameInput] = useState(null); // threadId cuando el usuario prefiere escribir su propio nombre
   const [confrontMission, setConfrontMission] = useState(null);
   const [dismissedResume, setDismissedResume] = useState({});
   const [evolutionOpenThreadId, setEvolutionOpenThreadId] = useState(null);
@@ -214,16 +251,23 @@ export default function PM1App() {
   const activeThread = profile.activeThreadId ? profile.threads[profile.activeThreadId] : null;
 
   // ============================================================================
-  // MAPA DE COMBATES
+  // MAPA DE COMBATES — arranque sin título manual
   // ============================================================================
-  function handleCreateThread() {
-    if (!newThreadTitle.trim()) return;
-    const next = addThread(profile, newThreadTitle.trim());
+  function handleStartCombat() {
+    if (!openingText.trim()) return;
+    const next = addThread(profile); // sin título: lo sugiere la IA tras leer esto
+    const threadId = next.activeThreadId;
+    const text = openingText.trim();
     persist(next);
-    setNewThreadTitle("");
+    setOpeningText("");
     setCheckinFeelings([]);
     setCheckinContexts([]);
     setView("chat");
+    sendMessageTo(threadId, next, text);
+  }
+
+  function insertStarter(phrase) {
+    setOpeningText((t) => (t.trim() ? `${t.trim()} ` : `${phrase}: `));
   }
 
   function openThread(threadId) {
@@ -272,15 +316,13 @@ export default function PM1App() {
   // ============================================================================
   // CHAT
   // ============================================================================
-  async function sendMessage() {
-    if (!input.trim() || loading || !activeThread) return;
-    const userMsg = { role: "user", content: input.trim() };
-    const threadWithMsg = { ...activeThread, messages: [...activeThread.messages, userMsg] };
-    let next = { ...profile, threads: { ...profile.threads, [activeThread.id]: threadWithMsg } };
+  async function sendMessageTo(threadId, profileSnapshot, text) {
+    const thread = profileSnapshot.threads[threadId];
+    if (!thread) return;
+    const userMsg = { role: "user", content: text };
+    const threadWithMsg = { ...thread, messages: [...thread.messages, userMsg] };
+    let next = { ...profileSnapshot, threads: { ...profileSnapshot.threads, [threadId]: threadWithMsg } };
     persist(next);
-    setInput("");
-    setCheckinFeelings([]);
-    setCheckinContexts([]);
     setLoading(true);
 
     try {
@@ -305,15 +347,24 @@ export default function PM1App() {
       };
 
       const threadWithReply = { ...threadWithMsg, messages: [...threadWithMsg.messages, assistantMsg] };
-      next = { ...next, threads: { ...next.threads, [activeThread.id]: threadWithReply } };
-      next = updateFromParsed(next, activeThread.id, parsed);
+      next = { ...next, threads: { ...next.threads, [threadId]: threadWithReply } };
+      next = updateFromParsed(next, threadId, parsed);
       persist(next);
     } catch (err) {
       const errMsg = { role: "assistant", content: "Error de conexión. Inténtalo de nuevo." };
       const threadWithErr = { ...threadWithMsg, messages: [...threadWithMsg.messages, errMsg] };
-      persist({ ...next, threads: { ...next.threads, [activeThread.id]: threadWithErr } });
+      persist({ ...next, threads: { ...next.threads, [threadId]: threadWithErr } });
     }
     setLoading(false);
+  }
+
+  async function sendMessage() {
+    if (!input.trim() || loading || !activeThread) return;
+    const text = input.trim();
+    setInput("");
+    setCheckinFeelings([]);
+    setCheckinContexts([]);
+    await sendMessageTo(activeThread.id, profile, text);
   }
 
   function handleKeyDown(e) {
@@ -438,26 +489,34 @@ export default function PM1App() {
         </div>
 
         <div style={styles.scrollArea}>
-          <p style={styles.mapIntro}>Mis Combates</p>
+          <div style={styles.starterCard}>
+            <p style={styles.starterQuestion}>¿Qué es eso que sabes que deberías hacer y no haces?</p>
+            <p style={styles.starterSub}>No hace falta que sepas ponerle nombre. Solo cuéntalo.</p>
 
-          <div style={styles.newThreadRow}>
-            <input
-              style={styles.newThreadInput}
-              placeholder="Ej. Procrastinación, Ansiedad social, Alcohol..."
-              value={newThreadTitle}
-              onChange={(e) => setNewThreadTitle(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleCreateThread()}
+            <div style={styles.chipRow}>
+              {[...STARTER_CHIPS, ...customStarters].map((s) => (
+                <button key={s} style={styles.chip} onClick={() => insertStarter(s)}>{s}</button>
+              ))}
+              <AddChipInline onAdd={(v) => { setCustomStarters((c) => [...c, v]); insertStarter(v); }} />
+            </div>
+
+            <textarea
+              style={styles.starterTextarea}
+              value={openingText}
+              onChange={(e) => setOpeningText(e.target.value)}
+              placeholder="O escribe con tus propias palabras, sin filtros..."
+              rows={4}
             />
-            <button style={styles.newThreadBtn} onClick={handleCreateThread}>+ Abrir combate</button>
+            <button
+              style={{ ...styles.newThreadBtn, ...styles.starterBtn, opacity: openingText.trim() ? 1 : 0.4 }}
+              disabled={!openingText.trim()}
+              onClick={handleStartCombat}
+            >
+              Continuar →
+            </button>
           </div>
 
-          {threadList.length === 0 && (
-            <div style={styles.emptyState}>
-              <div style={styles.emptyIcon}>⚔</div>
-              <p style={styles.emptyTitle}>Ningún combate abierto todavía</p>
-              <p style={styles.emptyText}>Nombra lo que quieres y no puedes hacer. Ese es tu primer combate.</p>
-            </div>
-          )}
+          {threadList.length > 0 && <p style={styles.mapIntro}>Mis Combates</p>}
 
           {threadList.map((t) => {
             const stale = shouldSuggestResume(t);
@@ -749,6 +808,43 @@ export default function PM1App() {
 
       <div style={styles.chatContainer}>
         <div style={styles.messages}>
+          {activeThread.suggestedTitle && !activeThread.titleConfirmed && (
+            <div style={styles.titleSuggestBanner}>
+              <span style={styles.sectionLabel}>NOMBRE SUGERIDO PARA ESTE COMBATE</span>
+              {titleNameInput !== activeThread.id ? (
+                <>
+                  <p style={styles.titleSuggestText}>"{activeThread.suggestedTitle}"</p>
+                  <div style={styles.resumeBannerBtns}>
+                    <button style={styles.resumeBtnSmall} onClick={() => persist(confirmThreadTitle(profile, activeThread.id, activeThread.suggestedTitle))}>Sí, así es</button>
+                    <button style={styles.resumeBtnSmall} onClick={() => setTitleNameInput(activeThread.id)}>Prefiero otro nombre</button>
+                    <button style={styles.resumeBtnSmall} onClick={() => persist(dismissSuggestedTitle(profile, activeThread.id))}>Ahora no</button>
+                  </div>
+                </>
+              ) : (
+                <div style={styles.titleSuggestEditRow}>
+                  <input
+                    style={styles.chipAddInput}
+                    placeholder="Escribe el nombre que prefieras"
+                    defaultValue={activeThread.suggestedTitle}
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { persist(confirmThreadTitle(profile, activeThread.id, e.target.value)); setTitleNameInput(null); }
+                    }}
+                    id="title-rename-input"
+                  />
+                  <button
+                    style={styles.chipAddConfirm}
+                    onClick={() => {
+                      const val = document.getElementById("title-rename-input").value;
+                      persist(confirmThreadTitle(profile, activeThread.id, val));
+                      setTitleNameInput(null);
+                    }}
+                  >✓</button>
+                </div>
+              )}
+            </div>
+          )}
+
           {showResumeBanner && (
             <div style={styles.resumeBanner}>
               <p style={styles.resumeBannerText}>{resumeSuggestionText(activeThread)}</p>
@@ -920,8 +1016,16 @@ const styles = {
   bottomNavLabel: { fontSize: 10, fontFamily: "'Space Mono', monospace", letterSpacing: "0.5px" },
 
   mapIntro: { fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#444", letterSpacing: "2px", textTransform: "uppercase" },
-  newThreadRow: { display: "flex", gap: 8, marginBottom: 4 },
-  newThreadInput: { flex: 1, background: "#0f0f0f", border: "1px solid #222", borderRadius: 8, color: "#e8e8e8", fontSize: 13, padding: "10px 12px", fontFamily: "'Space Grotesk', sans-serif" },
+
+  starterCard: { padding: "20px", background: "#0d0d0d", border: "1px solid #1e1e1e", borderRadius: 12, display: "flex", flexDirection: "column", gap: 10 },
+  starterQuestion: { fontSize: 17, fontWeight: 600, color: "#e8e8e8", lineHeight: 1.4 },
+  starterSub: { fontSize: 12.5, color: "#555", marginBottom: 4 },
+  starterTextarea: { background: "#0a0a0a", border: "1px solid #222", borderRadius: 8, color: "#e8e8e8", fontSize: 14, padding: "12px 14px", resize: "none", lineHeight: 1.6, fontFamily: "'Space Grotesk', sans-serif", marginTop: 4 },
+  starterBtn: { width: "100%", padding: "12px", fontSize: 13.5 },
+
+  titleSuggestBanner: { margin: "0 0 4px", padding: "12px 14px", background: "#0d0d0d", border: "1px solid rgba(200,245,66,0.25)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 6 },
+  titleSuggestText: { fontSize: 15, color: "#c8f542", fontWeight: 600 },
+  titleSuggestEditRow: { display: "flex", gap: 6, marginTop: 4 },
   newThreadBtn: { background: "#c8f542", color: "#0a0a0a", border: "none", borderRadius: 8, padding: "0 16px", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" },
   threadCard: { padding: "16px 18px", background: "#0d0d0d", border: "1px solid #1a1a1a", borderRadius: 10, cursor: "pointer", display: "flex", flexDirection: "column", gap: 8 },
   threadCardTop: { display: "flex", alignItems: "center", justifyContent: "space-between" },
