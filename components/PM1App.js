@@ -16,8 +16,6 @@ import {
   interpretInaction,
   maybeGenerateHypothesis,
   resolveHypothesis,
-  startDecreeProgram,
-  decreeProgramProgress,
   generateEvolutionReport,
   generatePatternMirror,
   updateFromParsed,
@@ -33,7 +31,6 @@ import {
   dismissSuggestedTitle,
   deleteThread,
   uid,
-  decreeDayNumber,
 } from "../lib/pm1-engine";
 
 // ============================================================================
@@ -373,6 +370,7 @@ export default function PM1App() {
         mechanism: parsed.mechanism,
         evasion: parsed.evasion,
         lesson: parsed.lesson,
+        principles: parsed.principles || [],
         proposedCombat: !hasPendingMission ? parsed.combat : null,
         committed: false,
         declined: false,
@@ -472,14 +470,9 @@ export default function PM1App() {
   }
 
   // ============================================================================
-  // DECRETOS
+  // PRINCIPIOS PM1
   // ============================================================================
-  function handleStartDecrees() {
-    if (!activeThread) return;
-    persist(startDecreeProgram(profile, activeThread.id));
-  }
-
-  function toggleDecreeOpen(id) {
+  function togglePrinciplesOpen(id) {
     setOpenDecreeIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
   }
 
@@ -497,7 +490,6 @@ export default function PM1App() {
   const mirror = useMemo(() => generatePatternMirror(profile), [profile]);
   const threadList = profile.threadOrder.map((id) => profile.threads[id]).filter(Boolean).reverse();
   const pendingMissionInThread = activeThread ? activeThread.missions.find((m) => m.executed === null) : null;
-  const activeDecreePrograms = activeThread ? activeThread.decreePrograms : [];
   const calendar = useMemo(() => buildStreakCalendar(profile, calendarOffset), [profile, calendarOffset]);
   const mechanismFreq = useMemo(() => getMechanismFrequencyList(profile), [profile]);
   const weeklyActivity = useMemo(() => getWeeklyActivity(profile), [profile]);
@@ -769,26 +761,23 @@ export default function PM1App() {
                   <div style={{ ...styles.threadProgressFill, width: `${t.progress}%`, background: colorForThread(t) }} />
                 </div>
 
-                {t.decreePrograms.length > 0 && t.decreePrograms.map((p) => {
-                  const open = openDecreeIds.includes(p.id);
+                {(t.principles || []).length > 0 && (() => {
+                  const open = openDecreeIds.includes(t.id);
                   return (
-                    <div key={p.id} style={styles.decreeSubCard}>
-                      <button style={styles.decreeCardHeader} onClick={() => toggleDecreeOpen(p.id)}>
+                    <div style={styles.decreeSubCard}>
+                      <button style={styles.decreeCardHeader} onClick={() => togglePrinciplesOpen(t.id)}>
                         <span style={styles.decreeCardHeaderLeft}>
                           <span style={styles.decreeChevron}>{open ? "▾" : "▸"}</span>
-                          <span style={styles.decreeSubLabel}>Decretos</span>
+                          <span style={styles.decreeSubLabel}>Principios PM1</span>
                         </span>
-                        <span style={styles.decreeProgress}>Día {decreeDayNumber(p)} de {p.durationDays}</span>
+                        <span style={styles.decreeProgress}>{t.principles.length}</span>
                       </button>
-                      {open && (
-                        <>
-                          {p.texts.map((txt, i) => <p key={i} style={styles.decreeCardText}>"{txt}"</p>)}
-                          <Bar pct={decreeProgramProgress(p)} color="#60a5fa" />
-                        </>
-                      )}
+                      {open && t.principles.slice().reverse().map((pr) => (
+                        <p key={pr.id} style={styles.decreeCardText}>"{pr.text}"</p>
+                      ))}
                     </div>
                   );
-                })}
+                })()}
 
                 {!deleting ? (
                   <button style={styles.threadDeleteBtn} onClick={() => setConfirmDeleteId(t.id)}>Eliminar combate</button>
@@ -1041,6 +1030,14 @@ export default function PM1App() {
                       <span style={styles.lessonTagText}>{msg.lesson}</span>
                     </div>
                   )}
+                  {msg.principles && msg.principles.length > 0 && (
+                    <div style={styles.principleTag}>
+                      <span style={styles.principleTagLabel}>PRINCIPIO{msg.principles.length > 1 ? "S" : ""} PM1</span>
+                      {msg.principles.map((pr, i) => (
+                        <span key={i} style={styles.principleTagText}>"{pr}"</span>
+                      ))}
+                    </div>
+                  )}
                   {msg.proposedCombat && (
                     <div style={styles.combatTag}>
                       <span style={styles.combatTagLabel}>PRIMER COMBATE PROPUESTO</span>
@@ -1097,37 +1094,6 @@ export default function PM1App() {
           </div>
         )}
 
-        {activeDecreePrograms.length > 0 && (
-          <div style={styles.decreeBar}>
-            <span style={styles.sectionLabel}>DECRETOS ACTIVOS EN ESTE COMBATE</span>
-            {activeDecreePrograms.map((p) => {
-              const open = openDecreeIds.includes(p.id);
-              return (
-                <div key={p.id} style={styles.decreeProgramRow}>
-                  <button style={styles.decreeCardHeader} onClick={() => toggleDecreeOpen(p.id)}>
-                    <span style={styles.decreeCardHeaderLeft}>
-                      <span style={styles.decreeChevron}>{open ? "▾" : "▸"}</span>
-                      <span style={styles.decreeDayLabel}>Día {decreeDayNumber(p)} de {p.durationDays}</span>
-                    </span>
-                  </button>
-                  {open && (
-                    <>
-                      {p.texts.map((t, i) => <p key={i} style={styles.decreeText}>"{t}"</p>)}
-                      <Bar pct={decreeProgramProgress(p)} color="#60a5fa" />
-                    </>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {!pendingMissionInThread && activeDecreePrograms.length === 0 && activeThread.missions.some((m) => m.executed !== null) && (
-          <div style={styles.decreeStartRow}>
-            <button style={styles.decreeStartBtn} onClick={handleStartDecrees}>+ Empezar programa de decretos para este combate</button>
-          </div>
-        )}
-
         <div style={styles.inputArea}>
           <textarea style={styles.textarea} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder="Describe tu situación..." rows={2} />
           <button style={{ ...styles.sendBtn, opacity: loading || !input.trim() ? 0.4 : 1 }} onClick={sendMessage} disabled={loading || !input.trim()}>→</button>
@@ -1155,8 +1121,6 @@ const styles = {
   bottomNavBtn: { flex: 1, background: "none", border: "none", padding: "10px 4px 12px", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, cursor: "pointer" },
   bottomNavIcon: { fontSize: 18 },
   bottomNavLabel: { fontSize: 10, fontFamily: "'Space Mono', monospace", letterSpacing: "0.5px" },
-
-  mapIntro: { fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#444", letterSpacing: "2px", textTransform: "uppercase" },
 
   starterCard: { padding: "20px", background: "#0d0d0d", border: "1px solid #1e1e1e", borderRadius: 12, display: "flex", flexDirection: "column", gap: 10 },
   starterQuestion: { fontSize: 17, fontWeight: 600, color: "#e8e8e8", lineHeight: 1.4 },
@@ -1231,6 +1195,10 @@ const styles = {
   lessonTagLabel: { display: "block", fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#60a5fa", letterSpacing: "2px", marginBottom: 4 },
   lessonTagText: { fontSize: 13, color: "#93c5fd", fontStyle: "italic" },
 
+  principleTag: { marginTop: 8, padding: "10px 12px", background: "rgba(200,245,66,0.05)", border: "1px solid rgba(200,245,66,0.25)", borderRadius: 6, display: "flex", flexDirection: "column", gap: 5 },
+  principleTagLabel: { fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#c8f542", letterSpacing: "2px" },
+  principleTagText: { fontSize: 13, color: "#e2f7a8", fontWeight: 500, lineHeight: 1.5 },
+
   reflectionRow: { display: "flex", justifyContent: "center", padding: "4px 20px" },
   reflectionText: { fontSize: 12, color: "#666", fontStyle: "italic", textAlign: "center", maxWidth: "85%", lineHeight: 1.6 },
 
@@ -1258,23 +1226,13 @@ const styles = {
   obstacleQuestion: { fontSize: 13, color: "#ccc" },
   obstacleInput: { background: "#0a0a0a", border: "1px solid #222", borderRadius: 6, color: "#e8e8e8", fontSize: 13, padding: "9px 12px", fontFamily: "'Space Grotesk', sans-serif" },
   obstacleSkipBtn: { flex: 1, background: "none", border: "1px solid #222", color: "#666", padding: "9px", borderRadius: 5, fontSize: 12, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
-
-  decreeBar: { margin: "0 16px 12px", padding: "14px 16px", background: "#0d0d0d", border: "1px solid rgba(96,165,250,0.2)", borderRadius: 8, flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 },
-  decreeProgramRow: { display: "flex", flexDirection: "column", gap: 6 },
-  decreeText: { fontSize: 12.5, color: "#93c5fd", fontStyle: "italic" },
-  decreeStartRow: { padding: "0 16px 12px" },
-  decreeStartBtn: { width: "100%", background: "none", border: "1px dashed #333", color: "#666", padding: "10px", borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
-
-  decreeCard: { padding: "16px 18px", background: "#0d0d0d", border: "1px solid #1a1a1a", borderRadius: 10, display: "flex", flexDirection: "column", gap: 8 },
   decreeSubCard: { marginTop: 4, paddingTop: 10, borderTop: "1px solid #1a1a1a", display: "flex", flexDirection: "column", gap: 8 },
   decreeSubLabel: { fontSize: 11.5, color: "#93c5fd" },
   threadDeleteBtn: { marginTop: 4, background: "none", border: "none", color: "#3a3a3a", fontSize: 11, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif", alignSelf: "flex-start", padding: "4px 0" },
   decreeCardHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
   decreeCardHeaderLeft: { display: "flex", alignItems: "center", gap: 8 },
   decreeChevron: { color: "#555", fontSize: 12, width: 12, display: "inline-block" },
-  decreeThreadTag: { fontSize: 11, padding: "3px 8px", borderRadius: 4, border: "1px solid", fontFamily: "'Space Mono', monospace" },
   decreeProgress: { fontSize: 12, color: "#666", fontFamily: "'Space Mono', monospace" },
-  decreeDayLabel: { fontSize: 11, color: "#555", fontFamily: "'Space Mono', monospace" },
   decreeCardText: { fontSize: 13, color: "#93c5fd", fontStyle: "italic", lineHeight: 1.5 },
 
   inputArea: { display: "flex", alignItems: "flex-end", gap: 10, padding: "12px 16px 16px", borderTop: "1px solid #141414", flexShrink: 0 },
