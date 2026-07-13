@@ -1,8 +1,14 @@
 import { buildSystemPrompt, parseAIResponse } from "../../../lib/pm1-engine";
+import { logMessage } from "../../../lib/db";
 
 export async function POST(req) {
   try {
     const { messages, profile, thread } = await req.json();
+
+    const lastUserMsg = messages[messages.length - 1];
+    if (lastUserMsg) {
+      await logMessage(thread?.id, thread?.title, "user", lastUserMsg.content);
+    }
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -30,6 +36,8 @@ export async function POST(req) {
     }
 
     const rawText = data.content?.map((c) => c.text || "").join("") || "";
+    await logMessage(thread?.id, thread?.title, "assistant", rawText);
+
     const parsed = parseAIResponse(rawText);
 
     return Response.json({ parsed });
