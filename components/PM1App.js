@@ -31,6 +31,9 @@ import {
   dismissSuggestedTitle,
   deleteThread,
   uid,
+  PHASES,
+  detectPhase,
+  setCareMode,
 } from "../lib/pm1-engine";
 
 // ============================================================================
@@ -371,6 +374,9 @@ export default function PM1App() {
         evasion: parsed.evasion,
         lesson: parsed.lesson,
         principles: parsed.principles || [],
+        environmentAdjustment: parsed.environmentAdjustment || null,
+        substitution: parsed.substitution || null,
+        careMode: !!parsed.careMode,
         proposedCombat: !hasPendingMission ? parsed.combat : null,
         committed: false,
         declined: false,
@@ -756,6 +762,7 @@ export default function PM1App() {
                 <p style={styles.threadCardMeta} onClick={() => !deleting && openThread(t.id)}>
                   {t.status === "paused" ? "Pausado" : pending ? "Misión pendiente" : `${executedCount} movimiento${executedCount === 1 ? "" : "s"} ejecutado${executedCount === 1 ? "" : "s"}`}
                   {stale ? " · lleva días sin tocarse" : ""}
+                  {" · " + PHASES[detectPhase(t)].label}
                 </p>
                 <div style={styles.threadProgressTrack} onClick={() => !deleting && openThread(t.id)}>
                   <div style={{ ...styles.threadProgressFill, width: `${t.progress}%`, background: colorForThread(t) }} />
@@ -901,15 +908,26 @@ export default function PM1App() {
   const showResumeBanner = stale && !dismissedResume[activeThread.id];
   const showCheckinChips = activeThread.messages.length === 0;
   const barCapturing = obstacleCapture && pendingMissionInThread && obstacleCapture.missionId === pendingMissionInThread.id;
+  const currentPhase = PHASES[detectPhase(activeThread)];
 
   return (
     <div style={styles.root}>
       <div style={styles.header}>
         <div style={styles.headerLeft}>
           <button style={styles.backBtn} onClick={() => setView("map")}>←</button>
-          <span style={{ ...styles.threadHeaderTitle, color: colorForThread(activeThread) }}>{activeThread.title}</span>
+          <div>
+            <span style={{ ...styles.threadHeaderTitle, color: colorForThread(activeThread) }}>{activeThread.title}</span>
+            {!activeThread.careMode && <div style={styles.phaseBadge}>{currentPhase.label}</div>}
+          </div>
         </div>
       </div>
+
+      {activeThread.careMode && (
+        <div style={styles.careModeBanner}>
+          <p style={styles.careModeText}>Este combate está en pausa mientras cuidamos de algo más importante. No hay prisa ni juego aquí.</p>
+          <button style={styles.careModeBtn} onClick={() => persist(setCareMode(profile, activeThread.id, false))}>Quiero continuar con normalidad</button>
+        </div>
+      )}
 
       {activeThread.suggestedTitle && !activeThread.titleConfirmed && (
         <div style={styles.titleSuggestBanner}>
@@ -1038,6 +1056,18 @@ export default function PM1App() {
                       ))}
                     </div>
                   )}
+                  {msg.environmentAdjustment && (
+                    <div style={styles.envTag}>
+                      <span style={styles.envTagLabel}>AJUSTE DE ENTORNO</span>
+                      <span style={styles.envTagText}>{msg.environmentAdjustment}</span>
+                    </div>
+                  )}
+                  {msg.substitution && (
+                    <div style={styles.subTag}>
+                      <span style={styles.subTagLabel}>EN VEZ DE ESO</span>
+                      <span style={styles.subTagText}>{msg.substitution}</span>
+                    </div>
+                  )}
                   {msg.proposedCombat && (
                     <div style={styles.combatTag}>
                       <span style={styles.combatTagLabel}>PRIMER COMBATE PROPUESTO</span>
@@ -1076,7 +1106,7 @@ export default function PM1App() {
           <div ref={messagesEndRef} />
         </div>
 
-        {pendingMissionInThread && (
+        {pendingMissionInThread && !activeThread.careMode && (
           <div style={styles.combatBar}>
             <p style={styles.combatBarQuestion}>¿Ya lo hiciste?</p>
             <p style={styles.combatBarAction}>{pendingMissionInThread.action}</p>
@@ -1114,6 +1144,11 @@ const styles = {
   logo: { fontFamily: "'Space Mono', monospace", fontWeight: 700, fontSize: 22, color: "#c8f542", letterSpacing: "-1px" },
   logoSub: { fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#333", letterSpacing: "3px", textTransform: "uppercase" },
   threadHeaderTitle: { fontSize: 16, fontWeight: 600 },
+  phaseBadge: { fontSize: 10, color: "#666", fontFamily: "'Space Mono', monospace", letterSpacing: "0.5px", marginTop: 2 },
+
+  careModeBanner: { margin: "10px 16px 0", padding: "14px 16px", background: "#0d0d0d", border: "1px solid rgba(96,165,250,0.3)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 10, flexShrink: 0 },
+  careModeText: { fontSize: 13, color: "#a8c5e8", lineHeight: 1.6 },
+  careModeBtn: { alignSelf: "flex-start", background: "none", border: "1px solid #60a5fa", color: "#93c5fd", borderRadius: 6, padding: "8px 14px", fontSize: 12, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
 
   scrollArea: { flex: 1, overflowY: "auto", padding: "20px", display: "flex", flexDirection: "column", gap: 12, paddingBottom: 90 },
 
@@ -1198,6 +1233,14 @@ const styles = {
   principleTag: { marginTop: 8, padding: "10px 12px", background: "rgba(200,245,66,0.05)", border: "1px solid rgba(200,245,66,0.25)", borderRadius: 6, display: "flex", flexDirection: "column", gap: 5 },
   principleTagLabel: { fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#c8f542", letterSpacing: "2px" },
   principleTagText: { fontSize: 13, color: "#e2f7a8", fontWeight: 500, lineHeight: 1.5 },
+
+  envTag: { marginTop: 8, padding: "10px 12px", background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 6, display: "flex", flexDirection: "column", gap: 5 },
+  envTagLabel: { fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#f59e0b", letterSpacing: "2px" },
+  envTagText: { fontSize: 13, color: "#fbbf6a", lineHeight: 1.5 },
+
+  subTag: { marginTop: 8, padding: "10px 12px", background: "rgba(192,132,252,0.06)", border: "1px solid rgba(192,132,252,0.25)", borderRadius: 6, display: "flex", flexDirection: "column", gap: 5 },
+  subTagLabel: { fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#c084fc", letterSpacing: "2px" },
+  subTagText: { fontSize: 13, color: "#d8b4fe", lineHeight: 1.5 },
 
   reflectionRow: { display: "flex", justifyContent: "center", padding: "4px 20px" },
   reflectionText: { fontSize: 12, color: "#666", fontStyle: "italic", textAlign: "center", maxWidth: "85%", lineHeight: 1.6 },
