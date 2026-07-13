@@ -22,6 +22,7 @@ import {
   buildStreakCalendar,
   getMechanismFrequencyList,
   getWeeklyActivity,
+  getMissionsForDate,
   FEELING_CHIPS,
   CONTEXT_CHIPS,
   formatCheckin,
@@ -216,6 +217,7 @@ export default function PM1App() {
   const [evolutionOpenThreadId, setEvolutionOpenThreadId] = useState(null);
   const [openDecreeIds, setOpenDecreeIds] = useState([]);
   const [calendarOffset, setCalendarOffset] = useState(0);
+  const [openDay, setOpenDay] = useState(null);
   const [obstacleCapture, setObstacleCapture] = useState(null); // { threadId, missionId, context: 'confront'|'bar' }
   const [checkinFeelings, setCheckinFeelings] = useState([]);
   const [checkinContexts, setCheckinContexts] = useState([]);
@@ -551,7 +553,7 @@ export default function PM1App() {
 
         <div style={styles.scrollArea}>
           <div style={styles.starterCard}>
-            <p style={styles.starterQuestion}>¿Qué es eso que quieres hacer?</p>
+            <p style={styles.starterQuestion}>¿Qué quieres hacer o enfrentar hoy?</p>
             <p style={styles.starterSub}>Y que llevas tiempo posponiendo, evitando, o sintiendo sin saber cómo soltarlo.</p>
 
             <div style={styles.chipRow}>
@@ -645,9 +647,9 @@ export default function PM1App() {
 
           <div style={styles.section}>
             <div style={styles.calendarHeader}>
-              <button style={styles.calendarNavBtn} onClick={() => setCalendarOffset((o) => o - 1)}>‹</button>
+              <button style={styles.calendarNavBtn} onClick={() => { setCalendarOffset((o) => o - 1); setOpenDay(null); }}>‹</button>
               <span style={styles.calendarMonthLabel}>{calendar.monthLabel}</span>
-              <button style={styles.calendarNavBtn} onClick={() => setCalendarOffset((o) => Math.min(0, o + 1))}>›</button>
+              <button style={styles.calendarNavBtn} onClick={() => { setCalendarOffset((o) => Math.min(0, o + 1)); setOpenDay(null); }}>›</button>
             </div>
             <div style={styles.calendarWeekdays}>
               {weekdays.map((w) => <span key={w} style={styles.calendarWeekday}>{w}</span>)}
@@ -655,19 +657,43 @@ export default function PM1App() {
             <div style={styles.calendarGrid}>
               {Array.from({ length: calendar.firstWeekday }).map((_, i) => <div key={"empty" + i} />)}
               {calendar.days.map((d) => {
+                const hasActivity = d.executed > 0 || d.failed > 0;
                 let bg = "transparent";
                 let border = "1px solid #1a1a1a";
                 let color = "#555";
                 if (d.executed > 0) { bg = "rgba(74,222,128,0.15)"; border = "1px solid rgba(74,222,128,0.35)"; color = "#4ade80"; }
                 else if (d.failed > 0) { bg = "rgba(248,113,113,0.1)"; border = "1px solid rgba(248,113,113,0.25)"; color = "#f87171"; }
                 if (d.isToday) border = "1px solid #c8f542";
+                if (openDay === d.day) border = "1px solid #e8e8e8";
                 return (
-                  <div key={d.day} style={{ ...styles.calendarDay, background: bg, border, color }}>
+                  <button
+                    key={d.day}
+                    style={{ ...styles.calendarDay, background: bg, border, color, cursor: hasActivity ? "pointer" : "default" }}
+                    onClick={() => hasActivity && setOpenDay(openDay === d.day ? null : d.day)}
+                  >
                     {d.day}
-                  </div>
+                  </button>
                 );
               })}
             </div>
+            {openDay && (() => {
+              const dayMissions = getMissionsForDate(profile, calendar.year, calendar.month, openDay);
+              return (
+                <div style={styles.dayDetail}>
+                  <span style={styles.sectionLabel}>{openDay} DE {calendar.monthLabel.split(" de ")[0].toUpperCase()}</span>
+                  {dayMissions.map((m, i) => (
+                    <div key={i} style={styles.dayDetailRow}>
+                      <span style={{ ...styles.dayDetailDot, background: m.executed ? "#4ade80" : "#f87171" }} />
+                      <div style={styles.dayDetailBody}>
+                        <span style={{ ...styles.dayDetailThread, color: m.threadColor }}>{m.threadTitle} · {m.time}</span>
+                        <span style={styles.dayDetailAction}>{m.action}</span>
+                        {!m.executed && m.obstacle && <span style={styles.dayDetailObstacle}>Motivo: {m.obstacle}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
             <div style={styles.calendarLegend}>
               <span style={styles.legendItem}><span style={{ ...styles.legendDot, background: "#4ade80" }} /> ejecutado</span>
               <span style={styles.legendItem}><span style={{ ...styles.legendDot, background: "#f87171" }} /> evitado</span>
@@ -1020,7 +1046,7 @@ export default function PM1App() {
           {activeThread.messages.length === 0 && !showCheckinChips && (
             <div style={styles.emptyState}>
               <div style={styles.emptyIcon}>⚔</div>
-              <p style={styles.emptyTitle}>¿Qué es eso que quieres hacer?</p>
+              <p style={styles.emptyTitle}>¿Qué quieres hacer o enfrentar hoy?</p>
             </div>
           )}
 
@@ -1333,8 +1359,16 @@ const styles = {
   calendarWeekdays: { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 },
   calendarWeekday: { fontSize: 10, color: "#444", textAlign: "center", fontFamily: "'Space Mono', monospace" },
   calendarGrid: { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 },
-  calendarDay: { aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 6, fontSize: 11, fontFamily: "'Space Mono', monospace" },
+  calendarDay: { aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 6, fontSize: 11, fontFamily: "'Space Mono', monospace", padding: 0, margin: 0 },
   calendarLegend: { display: "flex", gap: 14, marginTop: 4 },
+
+  dayDetail: { marginTop: 10, padding: "12px 14px", background: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: 8, display: "flex", flexDirection: "column", gap: 10 },
+  dayDetailRow: { display: "flex", gap: 9, alignItems: "flex-start" },
+  dayDetailDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0, marginTop: 5 },
+  dayDetailBody: { display: "flex", flexDirection: "column", gap: 3, flex: 1 },
+  dayDetailThread: { fontSize: 11, fontFamily: "'Space Mono', monospace" },
+  dayDetailAction: { fontSize: 13, color: "#ccc", lineHeight: 1.5 },
+  dayDetailObstacle: { fontSize: 12, color: "#777", fontStyle: "italic" },
   legendItem: { display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#666" },
   legendDot: { width: 7, height: 7, borderRadius: "50%" },
 
