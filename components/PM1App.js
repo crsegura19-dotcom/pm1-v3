@@ -219,6 +219,7 @@ export default function PM1App() {
   const [calendarOffset, setCalendarOffset] = useState(0);
   const [openDay, setOpenDay] = useState(null);
   const [obstacleCapture, setObstacleCapture] = useState(null); // { threadId, missionId, context: 'confront'|'bar' }
+  const [postponedMissionIds, setPostponedMissionIds] = useState([]); // no volver a interrumpir con estas en esta sesión
   const [checkinFeelings, setCheckinFeelings] = useState([]);
   const [checkinContexts, setCheckinContexts] = useState([]);
   const [customFeelings, setCustomFeelings] = useState([]);
@@ -248,12 +249,17 @@ export default function PM1App() {
   function checkForOverdue(p) {
     for (const tid of Object.keys(p.threads)) {
       const t = p.threads[tid];
-      const pending = t.missions.find((m) => m.executed === null);
+      const pending = t.missions.find((m) => m.executed === null && !postponedMissionIds.includes(m.id));
       if (pending && isMissionOverdue(pending)) {
         setConfrontMission({ threadId: tid, mission: pending });
         return;
       }
     }
+  }
+
+  function handlePostpone(missionId) {
+    setPostponedMissionIds((ids) => [...ids, missionId]);
+    setConfrontMission(null);
   }
 
   const activeThread = profile.activeThreadId ? profile.threads[profile.activeThreadId] : null;
@@ -387,6 +393,14 @@ export default function PM1App() {
       const threadWithReply = { ...threadWithMsg, messages: [...threadWithMsg.messages, assistantMsg] };
       next = { ...next, threads: { ...next.threads, [threadId]: threadWithReply } };
       next = updateFromParsed(next, threadId, parsed);
+
+      // Si la IA ya volvió a proponer un combate normal, es su propia señal de
+      // que el momento de cuidado pasó — no debería quedar el hilo bloqueado
+      // en la interfaz esperando a que el usuario pulse un botón aparte.
+      if (assistantMsg.proposedCombat && next.threads[threadId].careMode) {
+        next = setCareMode(next, threadId, false);
+      }
+
       persist(next);
     } catch (err) {
       const errMsg = { id: uid("msg_"), role: "assistant", content: "Error de conexión. Inténtalo de nuevo." };
@@ -526,6 +540,7 @@ export default function PM1App() {
                 <button style={{ ...styles.combatBtn, ...styles.combatBtnYes }} onClick={() => handleYes(threadId, mission.id)}>Sí, lo hice</button>
                 <button style={{ ...styles.combatBtn, ...styles.combatBtnNo }} onClick={() => handleNo(threadId, mission.id, "confront")}>No pude</button>
               </div>
+              <button style={styles.confrontPostponeBtn} onClick={() => handlePostpone(mission.id)}>Aún no — sigo con esto, dame más tiempo</button>
             </>
           ) : (
             <ObstacleCapture
@@ -1314,6 +1329,7 @@ const styles = {
   confrontAction: { fontSize: 20, color: "#e8e8e8", fontWeight: 600, lineHeight: 1.4, margin: "6px 0 16px" },
   confrontQuestion: { fontSize: 16, color: "#c8f542", fontWeight: 600, marginBottom: 16 },
   confrontBtns: { display: "flex", gap: 10 },
+  confrontPostponeBtn: { marginTop: 14, background: "none", border: "none", color: "#666", fontSize: 12.5, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif", textAlign: "left", padding: 0 },
 
   identityCard: { padding: "20px", background: "#0d0d0d", border: "1px solid #1e1e1e", borderRadius: 10 },
   identityLabel: { display: "block", fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#444", letterSpacing: "3px", marginBottom: 10 },
