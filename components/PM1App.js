@@ -1147,15 +1147,18 @@ export default function PM1App() {
           <div ref={messagesEndRef} />
         </div>
 
-        {pendingMissionInThread && !activeThread.careMode && (
+        {pendingMissionInThread && !activeThread.careMode && !postponedMissionIds.includes(pendingMissionInThread.id) && (
           <div style={styles.combatBar}>
             <p style={styles.combatBarQuestion}>¿Ya lo hiciste?</p>
             <p style={styles.combatBarAction}>{pendingMissionInThread.action}</p>
             {!barCapturing ? (
-              <div style={styles.combatBarBtns}>
-                <button style={{ ...styles.combatBtn, ...styles.combatBtnYes }} onClick={() => handleYes(activeThread.id, pendingMissionInThread.id)}>Sí, lo hice</button>
-                <button style={{ ...styles.combatBtn, ...styles.combatBtnNo }} onClick={() => handleNo(activeThread.id, pendingMissionInThread.id, "bar")}>No pude</button>
-              </div>
+              <>
+                <div style={styles.combatBarBtns}>
+                  <button style={{ ...styles.combatBtn, ...styles.combatBtnYes }} onClick={() => handleYes(activeThread.id, pendingMissionInThread.id)}>Sí, lo hice</button>
+                  <button style={{ ...styles.combatBtn, ...styles.combatBtnNo }} onClick={() => handleNo(activeThread.id, pendingMissionInThread.id, "bar")}>No pude</button>
+                </div>
+                <button style={styles.confrontPostponeBtn} onClick={() => handlePostpone(pendingMissionInThread.id)}>Aún no — sigo con esto, dame más tiempo</button>
+              </>
             ) : (
               <ObstacleCapture
                 onConfirm={(text) => finalizeResolution(activeThread.id, pendingMissionInThread.id, false, text || null)}
