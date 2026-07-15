@@ -1,13 +1,19 @@
 import { buildSystemPrompt, parseAIResponse } from "../../../lib/pm1-engine";
 import { logMessage } from "../../../lib/db";
+import { waitUntil } from "@vercel/functions";
 
 export async function POST(req) {
   try {
     const { messages, profile, thread } = await req.json();
 
+    // El registro en base de datos NO bloquea la respuesta al usuario — se
+    // completa en segundo plano (waitUntil) mientras el chat ya sigue.
+    // Antes esto se esperaba con "await", y sumado a la llamada a la IA podía
+    // superar el límite de tiempo de la función en Vercel, provocando
+    // "Error de conexión" y mensajes duplicados al reintentar.
     const lastUserMsg = messages[messages.length - 1];
     if (lastUserMsg) {
-      await logMessage(thread?.id, thread?.title, "user", lastUserMsg.content);
+      waitUntil(logMessage(thread?.id, thread?.title, "user", lastUserMsg.content));
     }
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -36,7 +42,7 @@ export async function POST(req) {
     }
 
     const rawText = data.content?.map((c) => c.text || "").join("") || "";
-    await logMessage(thread?.id, thread?.title, "assistant", rawText);
+    waitUntil(logMessage(thread?.id, thread?.title, "assistant", rawText));
 
     const parsed = parseAIResponse(rawText);
 
