@@ -201,6 +201,49 @@ function AddChipInline({ onAdd }) {
   );
 }
 
+// Dictado por voz usando la API nativa del navegador (gratis, sin servidor).
+// Chrome/Android la soporta bien; si el navegador no la tiene, avisa y no rompe nada.
+function MicButton({ onResult, style }) {
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef(null);
+
+  function toggleListening() {
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const SpeechRecognition = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
+    if (!SpeechRecognition) {
+      alert("Tu navegador no soporta dictado por voz. Prueba desde Chrome.");
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = "es-ES";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => setListening(true);
+    recognition.onend = () => setListening(false);
+    recognition.onerror = () => setListening(false);
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      if (transcript) onResult(transcript);
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+  }
+
+  return (
+    <button
+      type="button"
+      style={{ ...styles.micBtn, ...(listening ? styles.micBtnActive : {}), ...style }}
+      onClick={toggleListening}
+      title={listening ? "Escuchando... toca para parar" : "Dictar por voz"}
+    >
+      {listening ? "●" : "🎤"}
+    </button>
+  );
+}
+
 export default function PM1App() {
   const [view, setView] = useState("map");
   const [profile, setProfile] = useState(buildProfile);
@@ -578,13 +621,19 @@ export default function PM1App() {
               <AddChipInline onAdd={(v) => { setCustomStarters((c) => [...c, v]); insertStarter(v); }} />
             </div>
 
-            <textarea
-              style={styles.starterTextarea}
-              value={openingText}
-              onChange={(e) => setOpeningText(e.target.value)}
-              placeholder="O escribe con tus propias palabras, sin filtros..."
-              rows={4}
-            />
+            <div style={styles.textareaWithMic}>
+              <textarea
+                style={styles.starterTextarea}
+                value={openingText}
+                onChange={(e) => setOpeningText(e.target.value)}
+                placeholder="O escribe con tus propias palabras, sin filtros..."
+                rows={4}
+              />
+              <MicButton
+                style={{ position: "absolute", bottom: 10, right: 10 }}
+                onResult={(text) => setOpeningText((t) => (t.trim() ? `${t.trim()} ${text}` : text))}
+              />
+            </div>
             <button
               style={{ ...styles.newThreadBtn, ...styles.starterBtn, opacity: openingText.trim() ? 1 : 0.4 }}
               disabled={!openingText.trim()}
@@ -1170,6 +1219,7 @@ export default function PM1App() {
 
         <div style={styles.inputArea}>
           <textarea style={styles.textarea} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder="Describe tu situación..." rows={2} />
+          <MicButton onResult={(text) => setInput((t) => (t.trim() ? `${t.trim()} ${text}` : text))} />
           <button style={{ ...styles.sendBtn, opacity: loading || !input.trim() ? 0.4 : 1 }} onClick={sendMessage} disabled={loading || !input.trim()}>→</button>
         </div>
       </div>
@@ -1204,7 +1254,10 @@ const styles = {
   starterCard: { padding: "20px", background: "#0d0d0d", border: "1px solid #1e1e1e", borderRadius: 12, display: "flex", flexDirection: "column", gap: 10 },
   starterQuestion: { fontSize: 17, fontWeight: 600, color: "#e8e8e8", lineHeight: 1.4 },
   starterSub: { fontSize: 12.5, color: "#555", marginBottom: 4 },
-  starterTextarea: { background: "#0a0a0a", border: "1px solid #222", borderRadius: 8, color: "#e8e8e8", fontSize: 14, padding: "12px 14px", resize: "none", lineHeight: 1.6, fontFamily: "'Space Grotesk', sans-serif", marginTop: 4 },
+  starterTextarea: { background: "#0a0a0a", border: "1px solid #222", borderRadius: 8, color: "#e8e8e8", fontSize: 14, padding: "12px 14px", resize: "none", lineHeight: 1.6, fontFamily: "'Space Grotesk', sans-serif", marginTop: 4, width: "100%" },
+  textareaWithMic: { position: "relative" },
+  micBtn: { background: "#141414", border: "1px solid #333", color: "#999", borderRadius: "50%", width: 34, height: 34, fontSize: 15, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" },
+  micBtnActive: { background: "rgba(248,113,113,0.15)", border: "1px solid #f87171", color: "#f87171", animation: "pulse 1.2s ease-in-out infinite" },
   starterBtn: { width: "100%", padding: "12px", fontSize: 13.5 },
 
   moodCard: { padding: "18px 20px", background: "#0d0d0d", border: "1px solid #1e1e1e", borderRadius: 12, display: "flex", flexDirection: "column", gap: 8 },
