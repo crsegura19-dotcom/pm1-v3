@@ -13,25 +13,18 @@ export default async function AdminPage({ searchParams }) {
     );
   }
 
-  const PAGE_SIZE = 300;
-  const requestedLimit = parseInt(searchParams?.limit || String(PAGE_SIZE), 10);
-  const limit = Math.min(Math.max(requestedLimit || PAGE_SIZE, PAGE_SIZE), 6000); // tope duro de seguridad
-
   let logs = [];
   let error = null;
   try {
-    logs = await fetchLogs(limit);
+    logs = await fetchLogs(300);
   } catch (err) {
     error = err.message;
   }
 
-  const nextLimit = limit + PAGE_SIZE;
-  const hasMore = logs.length >= limit; // si vinieron tantos como pedimos, probablemente hay más
-
   return (
     <div style={styles.wrap}>
       <h1 style={styles.title}>PM1 — Registros</h1>
-      <p style={styles.sub}>{logs.length} mensajes mostrados (de todos los usuarios y combates)</p>
+      <p style={styles.sub}>{logs.length} mensajes más recientes (de todos los usuarios y combates)</p>
 
       {error && <p style={styles.error}>Error al consultar la base de datos: {error}</p>}
 
@@ -49,12 +42,6 @@ export default async function AdminPage({ searchParams }) {
       ))}
 
       {logs.length === 0 && !error && <p style={styles.sub}>Todavía no hay ningún mensaje registrado.</p>}
-
-      {hasMore && (
-        <a href={`/admin?key=${encodeURIComponent(key)}&limit=${nextLimit}`} style={styles.loadMoreBtn}>
-          Cargar {PAGE_SIZE} más →
-        </a>
-      )}
     </div>
   );
 }
@@ -68,5 +55,4 @@ const styles = {
   card: { background: "#0d0d0d", border: "1px solid #1a1a1a", borderRadius: 8, padding: "12px 14px", marginBottom: 10, maxWidth: 800 },
   meta: { fontSize: 11, color: "#555", fontFamily: "'Space Mono', monospace", marginBottom: 6 },
   content: { fontSize: 13.5, lineHeight: 1.6, whiteSpace: "pre-wrap" },
-  loadMoreBtn: { display: "inline-block", marginTop: 16, padding: "10px 18px", background: "none", border: "1px solid #333", borderRadius: 8, color: "#c8f542", fontSize: 13, textDecoration: "none", fontFamily: "'Space Grotesk', sans-serif" },
 };
