@@ -554,7 +554,10 @@ export default function PM1App() {
   const identity = profile.dominantIdentity ? IDENTITIES[profile.dominantIdentity] : null;
   const mirror = useMemo(() => generatePatternMirror(profile), [profile]);
   const threadList = profile.threadOrder.map((id) => profile.threads[id]).filter(Boolean).reverse();
-  const pendingMissionInThread = activeThread ? activeThread.missions.find((m) => m.executed === null) : null;
+  const pendingMissionInThread = activeThread
+    ? activeThread.missions.find((m) => m.executed === null && !postponedMissionIds.includes(m.id))
+    : null;
+  const pendingMissionsCount = activeThread ? activeThread.missions.filter((m) => m.executed === null).length : 0;
   const calendar = useMemo(() => buildStreakCalendar(profile, calendarOffset), [profile, calendarOffset]);
   const mechanismFreq = useMemo(() => getMechanismFrequencyList(profile), [profile]);
   const weeklyActivity = useMemo(() => getWeeklyActivity(profile), [profile]);
@@ -832,7 +835,7 @@ export default function PM1App() {
 
           {threadList.map((t) => {
             const stale = shouldSuggestResume(t);
-            const pending = t.missions.find((m) => m.executed === null);
+            const pendingCount = t.missions.filter((m) => m.executed === null).length;
             const executedCount = t.missions.filter((m) => m.executed).length;
             const deleting = confirmDeleteId === t.id;
             return (
@@ -850,7 +853,11 @@ export default function PM1App() {
                   </button>
                 </div>
                 <p style={styles.threadCardMeta} onClick={() => !deleting && openThread(t.id)}>
-                  {t.status === "paused" ? "Pausado" : pending ? "Misión pendiente" : `${executedCount} movimiento${executedCount === 1 ? "" : "s"} ejecutado${executedCount === 1 ? "" : "s"}`}
+                  {t.status === "paused"
+                    ? "Pausado"
+                    : pendingCount > 0
+                      ? `${pendingCount} misión${pendingCount === 1 ? "" : "es"} sin resolver`
+                      : `${executedCount} movimiento${executedCount === 1 ? "" : "s"} ejecutado${executedCount === 1 ? "" : "s"}`}
                   {stale ? " · lleva días sin tocarse" : ""}
                   {" · " + PHASES[detectPhase(t)].label}
                 </p>
@@ -1196,9 +1203,12 @@ export default function PM1App() {
           <div ref={messagesEndRef} />
         </div>
 
-        {pendingMissionInThread && !activeThread.careMode && !postponedMissionIds.includes(pendingMissionInThread.id) && (
+        {pendingMissionInThread && !activeThread.careMode && (
           <div style={styles.combatBar}>
-            <p style={styles.combatBarQuestion}>¿Ya lo hiciste?</p>
+            <p style={styles.combatBarQuestion}>
+              ¿Ya lo hiciste?
+              {pendingMissionsCount > 1 && <span style={styles.combatBarQueueTag}> · {pendingMissionsCount} pendientes, empezando por la más antigua</span>}
+            </p>
             <p style={styles.combatBarAction}>{pendingMissionInThread.action}</p>
             {!barCapturing ? (
               <>
@@ -1356,6 +1366,7 @@ const styles = {
 
   combatBar: { margin: "0 16px 12px", padding: "14px 16px", background: "#0d0d0d", border: "1px solid rgba(200,245,66,0.25)", borderRadius: 8, flexShrink: 0 },
   combatBarQuestion: { fontSize: 11, color: "#666", letterSpacing: "1px", textTransform: "uppercase", fontFamily: "'Space Mono', monospace", marginBottom: 6 },
+  combatBarQueueTag: { color: "#f59e0b", textTransform: "none", letterSpacing: "normal" },
   combatBarAction: { fontSize: 14, color: "#c8f542", fontWeight: 500, marginBottom: 12, lineHeight: 1.5 },
   combatBarBtns: { display: "flex", gap: 8 },
   combatBtn: { flex: 1, padding: "9px", border: "none", borderRadius: 5, fontSize: 13, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 500 },
