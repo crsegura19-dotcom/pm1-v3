@@ -9,7 +9,7 @@ import {
   setThreadStatus,
   colorForThread,
   shouldSuggestResume,
-  resumeSuggestionText,
+  resumeSuggestionText, 
   addMission,
   isMissionOverdue,
   resolveMission,
