@@ -12,6 +12,7 @@
     "react": "^18",
     "react-dom": "^18",
     "pg": "^8.11.3",
-    "@vercel/functions": "^1.5.0"
+    "@vercel/functions": "^1.5.0",
+    "bcryptjs": "^2.4.3"
   }
 }
