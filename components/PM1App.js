@@ -269,24 +269,117 @@ export default function PM1App() {
   const [customContexts, setCustomContexts] = useState([]);
   const messagesEndRef = useRef(null);
 
+  // ---- sesión / cuenta ----
+  const [session, setSession] = useState(null); // { email } una vez autenticado
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState(null);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [legacyProfile, setLegacyProfile] = useState(null); // progreso de antes del sistema de cuentas, si existe
+  const [justMigrated, setJustMigrated] = useState(false);
+
   useEffect(() => {
+    const savedSession = (() => {
+      try { return JSON.parse(localStorage.getItem("pm1_session") || "null"); } catch { return null; }
+    })();
+
+    if (savedSession?.email && savedSession?.password) {
+      doLogin(savedSession.email, savedSession.password, true);
+      return;
+    }
+
+    // No hay sesión todavía — comprobar si hay progreso de antes del sistema
+    // de cuentas, para poder migrarlo en cuanto se cree la cuenta nueva.
     try {
-      const saved = localStorage.getItem("pm1_profile_v3");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        setProfile(parsed);
-        checkForOverdue(parsed);
+      const legacy = localStorage.getItem("pm1_profile_v3");
+      if (legacy) {
+        const parsed = JSON.parse(legacy);
+        if (parsed?.threadOrder?.length > 0) setLegacyProfile(parsed);
       }
     } catch {}
+
+    setAuthLoading(false);
   }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [view, profile.activeThreadId, loading]);
 
+  // El navegador es solo una caché rápida — la fuente real es el servidor,
+  // para que borrar datos o cambiar de dispositivo no borre el progreso.
   function persist(p) {
     setProfile(p);
     try { localStorage.setItem("pm1_profile_v3", JSON.stringify(p)); } catch {}
+    if (session) {
+      try {
+        const saved = JSON.parse(localStorage.getItem("pm1_session") || "null");
+        if (saved?.email && saved?.password) {
+          fetch("/api/account/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: saved.email, password: saved.password, profile: p }),
+          }).catch(() => {});
+        }
+      } catch {}
+    }
+  }
+
+  async function doLogin(email, password, silent = false) {
+    setAuthSubmitting(true);
+    setAuthError(null);
+    try {
+      const res = await fetch("/api/account/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "No se pudo entrar.");
+
+      let p;
+      const shouldMigrate = data.isNew && legacyProfile;
+      if (shouldMigrate) {
+        p = legacyProfile;
+        // subir el progreso migrado de inmediato, no esperar al siguiente cambio
+        fetch("/api/account/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password, profile: p }),
+        }).catch(() => {});
+        setJustMigrated(true);
+      } else {
+        p = data.profile || buildProfile();
+      }
+
+      setProfile(p);
+      setSession({ email });
+      try {
+        localStorage.setItem("pm1_session", JSON.stringify({ email, password }));
+        localStorage.setItem("pm1_profile_v3", JSON.stringify(p));
+      } catch {}
+      checkForOverdue(p);
+    } catch (err) {
+      if (silent) {
+        // la sesión guardada ya no vale (contraseña cambiada, cuenta borrada...) — pide login de nuevo sin asustar
+        try { localStorage.removeItem("pm1_session"); } catch {}
+      } else {
+        setAuthError(err.message);
+      }
+    } finally {
+      setAuthSubmitting(false);
+      setAuthLoading(false);
+    }
+  }
+
+  function logout() {
+    try {
+      localStorage.removeItem("pm1_session");
+      localStorage.removeItem("pm1_profile_v3");
+    } catch {}
+    setSession(null);
+    setProfile(buildProfile());
+    setView("map");
   }
 
   function checkForOverdue(p) {
@@ -567,6 +660,63 @@ export default function PM1App() {
   );
 
   // ==========================================================================
+  // CARGANDO SESIÓN
+  // ==========================================================================
+  if (authLoading) {
+    return (
+      <div style={styles.root}>
+        <div style={styles.authWrap}>
+          <span style={styles.logo}>PM1</span>
+          <p style={styles.authLoadingText}>Cargando tu progreso...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================================================
+  // LOGIN / CREAR CUENTA — el progreso vive en el servidor, no solo aquí
+  // ==========================================================================
+  if (!session) {
+    return (
+      <div style={styles.root}>
+        <div style={styles.authWrap}>
+          <span style={styles.logo}>PM1</span>
+          <span style={styles.logoSub}>PRIMER MOVIMIENTO</span>
+          <p style={styles.authSubtitle}>Tu progreso se guarda de forma segura. Si cambias de móvil o borras datos, entra con el mismo correo y contraseña para recuperarlo todo.</p>
+          <input
+            style={styles.authInput}
+            type="email"
+            placeholder="Correo"
+            value={authEmail}
+            onChange={(e) => setAuthEmail(e.target.value)}
+            autoCapitalize="none"
+          />
+          <input
+            style={styles.authInput}
+            type="password"
+            placeholder="Contraseña"
+            value={authPassword}
+            onChange={(e) => setAuthPassword(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && authEmail.trim() && authPassword.trim() && doLogin(authEmail.trim().toLowerCase(), authPassword)}
+          />
+          {authError && <p style={styles.authError}>{authError}</p>}
+          <button
+            style={{ ...styles.authBtn, opacity: authSubmitting || !authEmail.trim() || !authPassword.trim() ? 0.5 : 1 }}
+            disabled={authSubmitting || !authEmail.trim() || !authPassword.trim()}
+            onClick={() => doLogin(authEmail.trim().toLowerCase(), authPassword)}
+          >
+            {authSubmitting ? "Entrando..." : "Entrar"}
+          </button>
+          <p style={styles.authHint}>Si es la primera vez que usas este correo, tu cuenta se crea sola con esa contraseña.</p>
+          {legacyProfile && (
+            <p style={styles.authMigrateHint}>Hemos detectado progreso guardado en este dispositivo — si creas una cuenta nueva, se migrará automáticamente.</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================================================
   // CONFRONTACIÓN (bloqueante, solo para misiones de días anteriores)
   // ==========================================================================
   if (confrontMission) {
@@ -613,6 +763,12 @@ export default function PM1App() {
         </div>
 
         <div style={styles.scrollArea}>
+          {justMigrated && (
+            <div style={styles.migrateBanner}>
+              <p style={styles.migrateBannerText}>✓ Tu progreso anterior de este dispositivo ya está guardado en tu cuenta.</p>
+              <button style={styles.migrateBannerClose} onClick={() => setJustMigrated(false)}>Entendido</button>
+            </div>
+          )}
           <div style={styles.starterCard}>
             <p style={styles.starterQuestion}>¿Qué quieres hacer o enfrentar hoy?</p>
             <p style={styles.starterSub}>Y que llevas tiempo posponiendo, evitando, o sintiendo sin saber cómo soltarlo.</p>
@@ -986,6 +1142,12 @@ export default function PM1App() {
             </div>
           )}
 
+          <div style={styles.section}>
+            <span style={styles.sectionLabel}>CUENTA</span>
+            <p style={styles.accountEmail}>{session?.email}</p>
+            <button style={styles.logoutBtn} onClick={logout}>Cerrar sesión</button>
+          </div>
+
           {(threadList.length > 0 || profile.wins.length > 0) && <ResetButton onConfirm={resetAll} />}
         </div>
         <BottomNav active="profile" onChange={goToNav} />
@@ -1246,6 +1408,22 @@ const styles = {
   headerLeft: { display: "flex", alignItems: "center", gap: 10 },
   backBtn: { background: "none", border: "1px solid #222", color: "#888", width: 30, height: 30, borderRadius: 6, cursor: "pointer", fontSize: 14 },
   logo: { fontFamily: "'Space Mono', monospace", fontWeight: 700, fontSize: 22, color: "#c8f542", letterSpacing: "-1px" },
+
+  authWrap: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px 28px", gap: 10, textAlign: "center" },
+  authLoadingText: { color: "#555", fontSize: 13, marginTop: 14 },
+  authSubtitle: { color: "#666", fontSize: 13, lineHeight: 1.6, maxWidth: 320, margin: "10px 0 20px" },
+  authInput: { width: "100%", maxWidth: 320, background: "#0d0d0d", border: "1px solid #222", borderRadius: 8, color: "#e8e8e8", fontSize: 14, padding: "12px 14px", marginBottom: 10, fontFamily: "'Space Grotesk', sans-serif" },
+  authError: { color: "#f87171", fontSize: 12.5, marginBottom: 6, maxWidth: 320 },
+  authBtn: { width: "100%", maxWidth: 320, background: "#c8f542", color: "#0a0a0a", border: "none", borderRadius: 8, padding: "13px", fontSize: 14, fontWeight: 600, cursor: "pointer", marginTop: 6 },
+  authHint: { color: "#3a3a3a", fontSize: 11.5, marginTop: 18, maxWidth: 300, lineHeight: 1.6 },
+  authMigrateHint: { color: "#93c5fd", fontSize: 11.5, marginTop: 10, maxWidth: 300, lineHeight: 1.6 },
+
+  migrateBanner: { padding: "12px 14px", background: "rgba(74,222,128,0.06)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" },
+  migrateBannerText: { color: "#4ade80", fontSize: 12.5, lineHeight: 1.5, flex: 1 },
+  migrateBannerClose: { background: "none", border: "1px solid rgba(74,222,128,0.3)", color: "#4ade80", borderRadius: 6, padding: "6px 12px", fontSize: 11.5, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif", whiteSpace: "nowrap" },
+
+  accountEmail: { color: "#999", fontSize: 13, wordBreak: "break-all" },
+  logoutBtn: { alignSelf: "flex-start", background: "none", border: "1px solid #2a2a2a", color: "#888", borderRadius: 6, padding: "8px 14px", fontSize: 12.5, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" },
   logoSub: { fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#333", letterSpacing: "3px", textTransform: "uppercase" },
   threadHeaderTitle: { fontSize: 16, fontWeight: 600 },
   phaseBadge: { fontSize: 10, color: "#666", fontFamily: "'Space Mono', monospace", letterSpacing: "0.5px", marginTop: 2 },
