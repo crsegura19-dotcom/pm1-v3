@@ -9,7 +9,7 @@ import {
   setThreadStatus,
   colorForThread,
   shouldSuggestResume,
-  resumeSuggestionText, 
+  resumeSuggestionText,
   addMission,
   isMissionOverdue,
   resolveMission,
@@ -276,6 +276,11 @@ export default function PM1App() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [authMode, setAuthMode] = useState("login"); // login | verify | forgot | reset
+  const [authCode, setAuthCode] = useState("");
+  const [authNewPassword, setAuthNewPassword] = useState("");
+  const [authInfo, setAuthInfo] = useState(null);
+  const [pendingEmail, setPendingEmail] = useState("");
   const [legacyProfile, setLegacyProfile] = useState(null); // progreso de antes del sistema de cuentas, si existe
   const [justMigrated, setJustMigrated] = useState(false);
 
@@ -328,6 +333,7 @@ export default function PM1App() {
   async function doLogin(email, password, silent = false) {
     setAuthSubmitting(true);
     setAuthError(null);
+    setAuthInfo(null);
     try {
       const res = await fetch("/api/account/login", {
         method: "POST",
@@ -335,33 +341,63 @@ export default function PM1App() {
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "No se pudo entrar.");
 
-      let p;
-      const shouldMigrate = data.isNew && legacyProfile;
-      if (shouldMigrate) {
-        p = legacyProfile;
-        // subir el progreso migrado de inmediato, no esperar al siguiente cambio
-        fetch("/api/account/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password, profile: p }),
-        }).catch(() => {});
-        setJustMigrated(true);
-      } else {
-        p = data.profile || buildProfile();
+      if (res.ok) {
+        let p = data.profile;
+        const shouldMigrate = !p && legacyProfile;
+        if (shouldMigrate) {
+          p = legacyProfile;
+          fetch("/api/account/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password, profile: p }),
+          }).catch(() => {});
+          setJustMigrated(true);
+        } else if (!p) {
+          p = buildProfile();
+        }
+        setProfile(p);
+        setSession({ email });
+        try {
+          localStorage.setItem("pm1_session", JSON.stringify({ email, password }));
+          localStorage.setItem("pm1_profile_v3", JSON.stringify(p));
+        } catch {}
+        checkForOverdue(p);
+        return;
       }
 
-      setProfile(p);
-      setSession({ email });
-      try {
-        localStorage.setItem("pm1_session", JSON.stringify({ email, password }));
-        localStorage.setItem("pm1_profile_v3", JSON.stringify(p));
-      } catch {}
-      checkForOverdue(p);
+      // No existe cuenta con este correo -> es la primera vez, la creamos y
+      // mandamos código de verificación (solo en el intento manual, nunca
+      // en el silencioso de fondo).
+      if (res.status === 404 && !silent) {
+        const regRes = await fetch("/api/account/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        const regData = await regRes.json();
+        if (!regRes.ok) throw new Error(regData.error || "No se pudo crear la cuenta.");
+        setPendingEmail(email);
+        setAuthMode("verify");
+        setAuthInfo("Te hemos enviado un código de 6 dígitos a tu correo.");
+        return;
+      }
+
+      if (data.needsVerification) {
+        setPendingEmail(email);
+        setAuthMode("verify");
+        setAuthInfo("Tu correo todavía no está verificado. Te hemos mandado un código nuevo.");
+        fetch("/api/account/resend-code", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        }).catch(() => {});
+        return;
+      }
+
+      throw new Error(data.error || "No se pudo entrar.");
     } catch (err) {
       if (silent) {
-        // la sesión guardada ya no vale (contraseña cambiada, cuenta borrada...) — pide login de nuevo sin asustar
         try { localStorage.removeItem("pm1_session"); } catch {}
       } else {
         setAuthError(err.message);
@@ -369,6 +405,89 @@ export default function PM1App() {
     } finally {
       setAuthSubmitting(false);
       setAuthLoading(false);
+    }
+  }
+
+  async function handleVerifyCode() {
+    setAuthSubmitting(true);
+    setAuthError(null);
+    try {
+      const res = await fetch("/api/account/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: pendingEmail, code: authCode.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Código incorrecto.");
+      setAuthCode("");
+      setAuthEmail(pendingEmail);
+      setAuthMode("login");
+      setAuthInfo("Correo verificado. Ya puedes entrar.");
+    } catch (err) {
+      setAuthError(err.message);
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }
+
+  async function handleResendCode() {
+    setAuthSubmitting(true);
+    setAuthError(null);
+    try {
+      await fetch("/api/account/resend-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: pendingEmail }),
+      });
+      setAuthInfo("Código reenviado.");
+    } catch {
+      setAuthError("No se pudo reenviar el código.");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }
+
+  async function handleForgotPassword() {
+    setAuthSubmitting(true);
+    setAuthError(null);
+    try {
+      const email = authEmail.trim().toLowerCase();
+      await fetch("/api/account/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      setPendingEmail(email);
+      setAuthMode("reset");
+      setAuthInfo("Si existe una cuenta con ese correo, te hemos mandado un código.");
+    } catch {
+      setAuthError("No se pudo enviar el código.");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }
+
+  async function handleResetPassword() {
+    setAuthSubmitting(true);
+    setAuthError(null);
+    try {
+      const res = await fetch("/api/account/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: pendingEmail, code: authCode.trim(), newPassword: authNewPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "No se pudo cambiar la contraseña.");
+      setAuthMode("login");
+      setAuthCode("");
+      setAuthNewPassword("");
+      setAuthEmail(pendingEmail);
+      setAuthPassword("");
+      setAuthInfo("Contraseña actualizada. Ya puedes entrar con la nueva.");
+    } catch (err) {
+      setAuthError(err.message);
+    } finally {
+      setAuthSubmitting(false);
     }
   }
 
@@ -682,34 +801,122 @@ export default function PM1App() {
         <div style={styles.authWrap}>
           <span style={styles.logo}>PM1</span>
           <span style={styles.logoSub}>PRIMER MOVIMIENTO</span>
-          <p style={styles.authSubtitle}>Tu progreso se guarda de forma segura. Si cambias de móvil o borras datos, entra con el mismo correo y contraseña para recuperarlo todo.</p>
-          <input
-            style={styles.authInput}
-            type="email"
-            placeholder="Correo"
-            value={authEmail}
-            onChange={(e) => setAuthEmail(e.target.value)}
-            autoCapitalize="none"
-          />
-          <input
-            style={styles.authInput}
-            type="password"
-            placeholder="Contraseña"
-            value={authPassword}
-            onChange={(e) => setAuthPassword(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && authEmail.trim() && authPassword.trim() && doLogin(authEmail.trim().toLowerCase(), authPassword)}
-          />
-          {authError && <p style={styles.authError}>{authError}</p>}
-          <button
-            style={{ ...styles.authBtn, opacity: authSubmitting || !authEmail.trim() || !authPassword.trim() ? 0.5 : 1 }}
-            disabled={authSubmitting || !authEmail.trim() || !authPassword.trim()}
-            onClick={() => doLogin(authEmail.trim().toLowerCase(), authPassword)}
-          >
-            {authSubmitting ? "Entrando..." : "Entrar"}
-          </button>
-          <p style={styles.authHint}>Si es la primera vez que usas este correo, tu cuenta se crea sola con esa contraseña.</p>
-          {legacyProfile && (
-            <p style={styles.authMigrateHint}>Hemos detectado progreso guardado en este dispositivo — si creas una cuenta nueva, se migrará automáticamente.</p>
+
+          {authMode === "login" && (
+            <>
+              <p style={styles.authSubtitle}>Tu progreso se guarda de forma segura. Si cambias de móvil o borras datos, entra con el mismo correo y contraseña para recuperarlo todo.</p>
+              <input
+                style={styles.authInput}
+                type="email"
+                placeholder="Correo"
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                autoCapitalize="none"
+              />
+              <input
+                style={styles.authInput}
+                type="password"
+                placeholder="Contraseña"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && authEmail.trim() && authPassword.trim() && doLogin(authEmail.trim().toLowerCase(), authPassword)}
+              />
+              {authError && <p style={styles.authError}>{authError}</p>}
+              {authInfo && <p style={styles.authInfoText}>{authInfo}</p>}
+              <button
+                style={{ ...styles.authBtn, opacity: authSubmitting || !authEmail.trim() || !authPassword.trim() ? 0.5 : 1 }}
+                disabled={authSubmitting || !authEmail.trim() || !authPassword.trim()}
+                onClick={() => doLogin(authEmail.trim().toLowerCase(), authPassword)}
+              >
+                {authSubmitting ? "Un momento..." : "Continuar"}
+              </button>
+              <button style={styles.authLinkBtn} onClick={() => { setAuthMode("forgot"); setAuthError(null); setAuthInfo(null); }}>
+                ¿Olvidaste tu contraseña?
+              </button>
+              {legacyProfile && (
+                <p style={styles.authMigrateHint}>Hemos detectado progreso guardado en este dispositivo — si creas una cuenta nueva, se migrará automáticamente.</p>
+              )}
+              <p style={styles.authHint}>Si es la primera vez que usas este correo, tu cuenta se crea sola con esa contraseña, y te mandamos un código para verificarla.</p>
+            </>
+          )}
+
+          {authMode === "verify" && (
+            <>
+              <p style={styles.authSubtitle}>Escribe el código de 6 dígitos que te hemos mandado a <b>{pendingEmail}</b>.</p>
+              <input
+                style={styles.authInput}
+                type="text"
+                inputMode="numeric"
+                placeholder="Código de 6 dígitos"
+                value={authCode}
+                onChange={(e) => setAuthCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              />
+              {authError && <p style={styles.authError}>{authError}</p>}
+              {authInfo && <p style={styles.authInfoText}>{authInfo}</p>}
+              <button
+                style={{ ...styles.authBtn, opacity: authSubmitting || authCode.trim().length !== 6 ? 0.5 : 1 }}
+                disabled={authSubmitting || authCode.trim().length !== 6}
+                onClick={handleVerifyCode}
+              >
+                {authSubmitting ? "Comprobando..." : "Verificar"}
+              </button>
+              <button style={styles.authLinkBtn} onClick={handleResendCode}>Reenviar código</button>
+              <button style={styles.authLinkBtn} onClick={() => { setAuthMode("login"); setAuthError(null); setAuthInfo(null); }}>Volver</button>
+            </>
+          )}
+
+          {authMode === "forgot" && (
+            <>
+              <p style={styles.authSubtitle}>Escribe tu correo y te mandamos un código para poner una contraseña nueva.</p>
+              <input
+                style={styles.authInput}
+                type="email"
+                placeholder="Correo"
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                autoCapitalize="none"
+              />
+              {authError && <p style={styles.authError}>{authError}</p>}
+              <button
+                style={{ ...styles.authBtn, opacity: authSubmitting || !authEmail.trim() ? 0.5 : 1 }}
+                disabled={authSubmitting || !authEmail.trim()}
+                onClick={handleForgotPassword}
+              >
+                {authSubmitting ? "Enviando..." : "Enviar código"}
+              </button>
+              <button style={styles.authLinkBtn} onClick={() => { setAuthMode("login"); setAuthError(null); }}>Volver</button>
+            </>
+          )}
+
+          {authMode === "reset" && (
+            <>
+              <p style={styles.authSubtitle}>Escribe el código que te hemos mandado a <b>{pendingEmail}</b> y tu nueva contraseña.</p>
+              <input
+                style={styles.authInput}
+                type="text"
+                inputMode="numeric"
+                placeholder="Código de 6 dígitos"
+                value={authCode}
+                onChange={(e) => setAuthCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              />
+              <input
+                style={styles.authInput}
+                type="password"
+                placeholder="Nueva contraseña"
+                value={authNewPassword}
+                onChange={(e) => setAuthNewPassword(e.target.value)}
+              />
+              {authError && <p style={styles.authError}>{authError}</p>}
+              {authInfo && <p style={styles.authInfoText}>{authInfo}</p>}
+              <button
+                style={{ ...styles.authBtn, opacity: authSubmitting || authCode.trim().length !== 6 || !authNewPassword.trim() ? 0.5 : 1 }}
+                disabled={authSubmitting || authCode.trim().length !== 6 || !authNewPassword.trim()}
+                onClick={handleResetPassword}
+              >
+                {authSubmitting ? "Guardando..." : "Cambiar contraseña"}
+              </button>
+              <button style={styles.authLinkBtn} onClick={() => { setAuthMode("login"); setAuthError(null); }}>Volver</button>
+            </>
           )}
         </div>
       </div>
@@ -1417,6 +1624,8 @@ const styles = {
   authBtn: { width: "100%", maxWidth: 320, background: "#c8f542", color: "#0a0a0a", border: "none", borderRadius: 8, padding: "13px", fontSize: 14, fontWeight: 600, cursor: "pointer", marginTop: 6 },
   authHint: { color: "#3a3a3a", fontSize: 11.5, marginTop: 18, maxWidth: 300, lineHeight: 1.6 },
   authMigrateHint: { color: "#93c5fd", fontSize: 11.5, marginTop: 10, maxWidth: 300, lineHeight: 1.6 },
+  authLinkBtn: { background: "none", border: "none", color: "#666", fontSize: 12.5, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif", marginTop: 12, textDecoration: "underline" },
+  authInfoText: { color: "#4ade80", fontSize: 12.5, marginBottom: 6, maxWidth: 320 },
 
   migrateBanner: { padding: "12px 14px", background: "rgba(74,222,128,0.06)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" },
   migrateBannerText: { color: "#4ade80", fontSize: 12.5, lineHeight: 1.5, flex: 1 },
