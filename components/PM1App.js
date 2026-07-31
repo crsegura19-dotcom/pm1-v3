@@ -434,14 +434,16 @@ export default function PM1App() {
     setAuthSubmitting(true);
     setAuthError(null);
     try {
-      await fetch("/api/account/resend-code", {
+      const res = await fetch("/api/account/resend-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: pendingEmail }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "No se pudo reenviar el código.");
       setAuthInfo("Código reenviado.");
-    } catch {
-      setAuthError("No se pudo reenviar el código.");
+    } catch (err) {
+      setAuthError(err.message || "No se pudo reenviar el código.");
     } finally {
       setAuthSubmitting(false);
     }
@@ -452,16 +454,18 @@ export default function PM1App() {
     setAuthError(null);
     try {
       const email = authEmail.trim().toLowerCase();
-      await fetch("/api/account/forgot-password", {
+      const res = await fetch("/api/account/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "No se pudo enviar el código.");
       setPendingEmail(email);
       setAuthMode("reset");
       setAuthInfo("Si existe una cuenta con ese correo, te hemos mandado un código.");
-    } catch {
-      setAuthError("No se pudo enviar el código.");
+    } catch (err) {
+      setAuthError(err.message || "No se pudo enviar el código.");
     } finally {
       setAuthSubmitting(false);
     }
