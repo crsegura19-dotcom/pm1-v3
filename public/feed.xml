@@ -8,17 +8,45 @@
   <atom:link href="https://pm1ai.com/feed.xml" rel="self" type="application/rss+xml"/>
 
   <item>
+    <title>Disciplina sin fuerza de voluntad: diseña el entorno en vez de depender de las ganas</title>
+    <link>https://pm1ai.com/blog/disciplina-sin-fuerza-de-voluntad.html</link>
+    <guid>https://pm1ai.com/blog/disciplina-sin-fuerza-de-voluntad.html</guid>
+    <description>La fuerza de voluntad es un recurso limitado que se agota. La disciplina real se construye diseñando el entorno para necesitar menos de ella.</description>
+    <pubDate>Thu, 23 Jul 2026 16:00:00 GMT</pubDate>
+  </item>
+  <item>
+    <title>Por qué evitas las conversaciones difíciles (y cómo tener la primera)</title>
+    <link>https://pm1ai.com/blog/por-que-evitas-conversaciones-dificiles.html</link>
+    <guid>https://pm1ai.com/blog/por-que-evitas-conversaciones-dificiles.html</guid>
+    <description>La conversación que evitas no desaparece por posponerla, solo se vuelve más grande.</description>
+    <pubDate>Thu, 23 Jul 2026 15:00:00 GMT</pubDate>
+  </item>
+  <item>
+    <title>Parálisis por análisis: cuando pensar se convierte en otra forma de evitar</title>
+    <link>https://pm1ai.com/blog/paralisis-por-analisis.html</link>
+    <guid>https://pm1ai.com/blog/paralisis-por-analisis.html</guid>
+    <description>Seguir investigando, comparando y planificando puede sentirse como avanzar. A veces es la forma más sofisticada de no actuar.</description>
+    <pubDate>Thu, 23 Jul 2026 14:00:00 GMT</pubDate>
+  </item>
+  <item>
+    <title>Cómo poner límites sin sentirte culpable</title>
+    <link>https://pm1ai.com/blog/como-poner-limites-sin-culpa.html</link>
+    <guid>https://pm1ai.com/blog/como-poner-limites-sin-culpa.html</guid>
+    <description>Evitar poner un límite no te hace mejor persona, solo pospone el costo.</description>
+    <pubDate>Thu, 23 Jul 2026 13:00:00 GMT</pubDate>
+  </item>
+  <item>
     <title>Qué es el Primer Movimiento y cómo aplicarlo a cualquier problema</title>
     <link>https://pm1ai.com/blog/que-es-el-primer-movimiento.html</link>
     <guid>https://pm1ai.com/blog/que-es-el-primer-movimiento.html</guid>
-    <description>El Primer Movimiento es la acción mínima real que rompe la inercia de un patrón repetitivo. Qué es, por qué funciona, y cómo encontrar el tuyo hoy.</description>
+    <description>El Primer Movimiento es la acción mínima real que rompe la inercia de un patrón repetitivo.</description>
     <pubDate>Wed, 22 Jul 2026 12:00:00 GMT</pubDate>
   </item>
   <item>
     <title>Cómo dejar de compararte con los demás</title>
     <link>https://pm1ai.com/blog/como-dejar-de-compararte.html</link>
     <guid>https://pm1ai.com/blog/como-dejar-de-compararte.html</guid>
-    <description>Compararte no es el problema real, es una evasión: mirar la vida de otros es más fácil que actuar sobre la tuya.</description>
+    <description>Compararte no es el problema real, es una evasión.</description>
     <pubDate>Wed, 22 Jul 2026 11:00:00 GMT</pubDate>
   </item>
   <item>
@@ -32,36 +60,8 @@
     <title>Qué hacer cuando no tienes motivación (y no la vas a tener)</title>
     <link>https://pm1ai.com/blog/que-hacer-sin-motivacion.html</link>
     <guid>https://pm1ai.com/blog/que-hacer-sin-motivacion.html</guid>
-    <description>Esperar a sentir motivación antes de actuar es la trampa. La motivación llega después de la acción, no antes.</description>
+    <description>Esperar a sentir motivación antes de actuar es la trampa.</description>
     <pubDate>Wed, 22 Jul 2026 09:00:00 GMT</pubDate>
-  </item>
-  <item>
-    <title>Miedo al rechazo: por qué evitas pedir lo que quieres</title>
-    <link>https://pm1ai.com/blog/miedo-al-rechazo.html</link>
-    <guid>https://pm1ai.com/blog/miedo-al-rechazo.html</guid>
-    <description>El miedo al rechazo no se supera esperando a sentirte más seguro. Se atraviesa pidiendo, preguntando o proponiendo antes de estar listo.</description>
-    <pubDate>Tue, 21 Jul 2026 18:00:00 GMT</pubDate>
-  </item>
-  <item>
-    <title>Por qué tus hábitos automáticos protegen una identidad</title>
-    <link>https://pm1ai.com/blog/identidad-y-habitos.html</link>
-    <guid>https://pm1ai.com/blog/identidad-y-habitos.html</guid>
-    <description>No repites tus hábitos por falta de disciplina: los repites porque coinciden con la historia que te cuentas sobre quién eres.</description>
-    <pubDate>Tue, 21 Jul 2026 17:00:00 GMT</pubDate>
-  </item>
-  <item>
-    <title>Qué es la resistencia al cambio y cómo medirla en ti mismo</title>
-    <link>https://pm1ai.com/blog/resistencia-al-cambio.html</link>
-    <guid>https://pm1ai.com/blog/resistencia-al-cambio.html</guid>
-    <description>La resistencia al cambio es la distancia entre lo que dices querer y lo que estás dispuesto a hacer.</description>
-    <pubDate>Tue, 21 Jul 2026 16:00:00 GMT</pubDate>
-  </item>
-  <item>
-    <title>Cómo dejar de procrastinar cuando ya sabes exactamente qué hacer</title>
-    <link>https://pm1ai.com/blog/como-dejar-de-procrastinar.html</link>
-    <guid>https://pm1ai.com/blog/como-dejar-de-procrastinar.html</guid>
-    <description>Si el problema fuera falta de disciplina, más motivación lo resolvería. No lo hace.</description>
-    <pubDate>Tue, 21 Jul 2026 15:00:00 GMT</pubDate>
   </item>
 </channel>
 </rss>
